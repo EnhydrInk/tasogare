@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import multer from "multer";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync } from "fs";
 import { execFileSync } from "child_process";
 import { join, dirname } from "path";
@@ -19,6 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || "3300", 10);
+const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, "data");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || join(__dirname, "uploads");
 const EXTRACT_SCRIPT = join(__dirname, "extract_pdf.py");
@@ -134,7 +135,7 @@ function getPage(book, pageNum) {
 function createMcp() {
   const server = new McpServer({ name: "book", version: "1.0.0" });
 
-  server.tool("list_books", "书架列表", {}, async () => {
+  server.tool("list_books", "List all books on the shelf / 书架列表", {}, async () => {
     const books = listBooks();
     if (books.length === 0) return { content: [{ type: "text", text: "书架空空如也。" }] };
     const text = books.map(b =>
@@ -143,7 +144,7 @@ function createMcp() {
     return { content: [{ type: "text", text }] };
   });
 
-  server.tool("read_pages", "分页读取书籍内容", {
+  server.tool("read_pages", "Read book content by page number / 分页读取书籍内容", {
     book_id: z.string().describe("书籍ID"),
     page: z.number().optional().describe("页码,默认1"),
   }, async ({ book_id, page }) => {
@@ -158,7 +159,7 @@ function createMcp() {
     return { content: [{ type: "text", text }] };
   });
 
-  server.tool("read_annotations", "读取批注", {
+  server.tool("read_annotations", "Read annotations and highlights / 读取批注和划线", {
     book_id: z.string().describe("书籍ID"),
     author: z.string().optional().describe("筛选作者名"),
     context_size: z.number().optional().describe("上下文段落数，默认3"),
@@ -184,7 +185,7 @@ function createMcp() {
     return { content: [{ type: "text", text }] };
   });
 
-  server.tool("write_comment", "Claude写评论", {
+  server.tool("write_comment", "Write a note or comment on a paragraph / 写评论批注", {
     book_id: z.string().describe("书籍ID"),
     paragraph_id: z.number().describe("段落编号"),
     content: z.string().describe("评论内容"),
@@ -211,7 +212,7 @@ function createMcp() {
     });
   });
 
-  server.tool("highlight_text", "Claude画荧光笔高亮", {
+  server.tool("highlight_text", "Highlight text in a paragraph / 划线高亮", {
     book_id: z.string().describe("书籍ID"),
     paragraph_id: z.number().describe("段落编号"),
     text: z.string().describe("要高亮的原文片段（必须是段落中的原文）"),
@@ -239,7 +240,7 @@ function createMcp() {
   });
 
 
-  server.tool("set_toc", "设置或更新书籍目录", {
+  server.tool("set_toc", "Set or update table of contents / 设置目录", {
     book_id: z.string().describe("书籍ID"),
     toc: z.array(z.object({
       title: z.string().describe("章节标题"),
@@ -254,7 +255,7 @@ function createMcp() {
     return { content: [{ type: "text", text: "目录已更新，共" + toc.length + "个条目。" }] };
   });
 
-  server.tool("get_progress", "读取阅读进度", {
+  server.tool("get_progress", "Get reading progress / 读取阅读进度", {
     book_id: z.string().describe("书籍ID"),
   }, async ({ book_id }) => {
     const book = loadBook(book_id);
@@ -266,7 +267,7 @@ function createMcp() {
     return { content: [{ type: "text", text: `《${book.title}》阅读进度：第${p.page}/${totalPages}页 (${pct}%)` }] };
   });
 
-  server.tool("delete_book", "删除书籍", {
+  server.tool("delete_book", "Delete a book / 删除书籍", {
     book_id: z.string().describe("书籍ID"),
   }, async ({ book_id }) => {
     const p = bookPath(book_id);
@@ -631,10 +632,98 @@ app.post("/api/reindex", (req, res) => {
   res.json({ ok: true, reindexed: count });
 });
 
+// --- OAuth Resource Metadata & Bearer Token Auth ---
+function externalBaseUrl(req) {
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+function mcpResourceMetadata(req) {
+  const baseUrl = externalBaseUrl(req);
+  return {
+    resource: `${baseUrl}/mcp`,
+    resource_name: "Anno",
+    bearer_methods_supported: ["header"],
+    scopes_supported: [],
+    authorization_servers: [externalBaseUrl(req)],
+  };
+}
+
+function mcpAuthorized(req) {
+  if (!MCP_AUTH_TOKEN) return true;
+  const auth = req.headers.authorization;
+  return auth === `Bearer ${MCP_AUTH_TOKEN}`;
+}
+
+app.get("/.well-known/oauth-protected-resource", (req, res) => {
+  res.json(mcpResourceMetadata(req));
+});
+app.get("/.well-known/oauth-protected-resource/mcp", (req, res) => {
+  res.json(mcpResourceMetadata(req));
+});
+
+
+// --- OAuth 2.1 Minimal Flow ---
+const pendingCodes = new Map();
+
+app.get("/.well-known/oauth-authorization-server", (req, res) => {
+  const baseUrl = externalBaseUrl(req);
+  res.json({
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/authorize`,
+    token_endpoint: `${baseUrl}/token`,
+    registration_endpoint: `${baseUrl}/register`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code"],
+    code_challenge_methods_supported: ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
+  });
+});
+
+app.post("/register", (req, res) => {
+  const clientId = randomUUID();
+  res.status(201).json({
+    client_id: clientId,
+    client_name: req.body.client_name || "MCP Client",
+    redirect_uris: req.body.redirect_uris || [],
+  });
+});
+
+app.get("/authorize", (req, res) => {
+  const { response_type, client_id, redirect_uri, code_challenge, code_challenge_method, state } = req.query;
+  if (response_type !== "code" || !redirect_uri) return res.status(400).send("Invalid request");
+  const code = randomUUID();
+  pendingCodes.set(code, { client_id, redirect_uri, code_challenge, code_challenge_method, created: Date.now() });
+  setTimeout(() => pendingCodes.delete(code), 300000);
+  const url = new URL(redirect_uri);
+  url.searchParams.set("code", code);
+  if (state) url.searchParams.set("state", state);
+  res.redirect(302, url.toString());
+});
+
+app.post("/token", express.urlencoded({ extended: false }), (req, res) => {
+  const { grant_type, code, code_verifier } = req.body;
+  if (grant_type !== "authorization_code") return res.status(400).json({ error: "unsupported_grant_type" });
+  const pending = pendingCodes.get(code);
+  if (!pending) return res.status(400).json({ error: "invalid_grant" });
+  pendingCodes.delete(code);
+  if (pending.code_challenge && code_verifier) {
+    const expected = createHash("sha256").update(code_verifier).digest("base64url");
+    if (expected !== pending.code_challenge) return res.status(400).json({ error: "invalid_grant", error_description: "PKCE mismatch" });
+  }
+  res.json({ access_token: MCP_AUTH_TOKEN, token_type: "Bearer", expires_in: 86400 });
+});
+
 // --- MCP dual transport ---
 const transports = {};
 
 app.use("/mcp", (req, res, next) => {
+  if (!mcpAuthorized(req)) {
+    const metadataUrl = `${externalBaseUrl(req)}/.well-known/oauth-protected-resource/mcp`;
+    res.status(401).set("www-authenticate", `Bearer resource_metadata="${metadataUrl}"`).json({ error: "Unauthorized" });
+    return;
+  }
   console.log(`[mcp] ${req.method} ${req.url} | session: ${req.headers["mcp-session-id"] || "none"}`);
   if (req.method === "POST" && req.body) console.log(`  body.method: ${req.body?.method || "N/A"}`);
   next();
@@ -691,23 +780,3 @@ app.post("/mcp/messages", async (req, res) => {
 app.get("/health", (req, res) => res.json({ status: "ok", service: "anno" }));
 
 app.listen(PORT, '127.0.0.1', () => console.log(`Anno MCP server on 127.0.0.1:${PORT}`));
-
-// --- Visitor Counter ---
-const COUNTER_FILE = join(DATA_DIR, "visitor_count.json");
-function getVisitorCount() {
-  try { return JSON.parse(readFileSync(COUNTER_FILE, "utf-8")).count || 0; } catch { return 42; }
-}
-function incVisitorCount() {
-  const c = getVisitorCount() + 1;
-  const tmp = COUNTER_FILE + '.tmp';
-  writeFileSync(tmp, JSON.stringify({ count: c }), "utf-8");
-  renameSync(tmp, COUNTER_FILE);
-  return c;
-}
-app.get("/api/visitor-count", (req, res) => {
-  res.json({ count: getVisitorCount() });
-});
-app.post("/api/visitor-count", (req, res) => {
-  const count = incVisitorCount();
-  res.json({ count });
-});
