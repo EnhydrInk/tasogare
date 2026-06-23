@@ -238,20 +238,7 @@ function createMcp() {
   });
 
 
-  server.tool("set_toc", "设置或更新书籍目录", {
-    book_id: z.string().describe("书籍ID"),
-    toc: z.array(z.object({
-      title: z.string().describe("章节标题"),
-      paragraph_id: z.number().describe("对应的段落ID"),
-      level: z.number().optional().describe("层级，0=顶级，1=子章节，2=子子章节")
-    })).describe("目录条目数组")
-  }, async ({ book_id, toc }) => {
-    const book = loadBook(book_id);
-    if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
-    book.toc = toc.map(t => ({ title: t.title, paragraph_id: t.paragraph_id, level: t.level || 0 }));
-    saveBook(book);
-    return { content: [{ type: "text", text: "目录已更新，共" + toc.length + "个条目。" }] };
-  });
+
 
   server.tool("get_progress", "读取阅读进度", {
     book_id: z.string().describe("书籍ID"),
@@ -265,15 +252,6 @@ function createMcp() {
     return { content: [{ type: "text", text: `《${book.title}》阅读进度：第${p.page}/${totalPages}页 (${pct}%)` }] };
   });
 
-  server.tool("delete_book", "删除书籍", {
-    book_id: z.string().describe("书籍ID"),
-  }, async ({ book_id }) => {
-    const p = bookPath(book_id);
-    if (!existsSync(p)) return { content: [{ type: "text", text: "找不到这本书。" }] };
-    const book = loadBook(book_id);
-    unlinkSync(p);
-    return { content: [{ type: "text", text: `已删除《${book?.title || book_id}》。` }] };
-  });
 
   return server;
 }
@@ -748,7 +726,12 @@ app.use("/mcp", (req, res, next) => {
 app.post("/mcp/sse", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"];
   if (sessionId && transports[sessionId]) {
-    await transports[sessionId].transport.handleRequest(req, res, req.body);
+    const t = transports[sessionId].transport;
+    if (typeof t.handleRequest === "function") {
+      await t.handleRequest(req, res, req.body);
+    } else if (typeof t.handlePostMessage === "function") {
+      await t.handlePostMessage(req, res, req.body);
+    }
     return;
   }
   if (!isInitializeRequest(req.body)) {
