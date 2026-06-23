@@ -394,6 +394,37 @@ function closeAnnotPanel() {
   document.getElementById('annotPanel').classList.remove('open');
 }
 
+function renderNoteWithReplies(note, allNotes, hlText, depth) {
+  depth = depth || 0;
+  const isClaude = note.author === 'Claude';
+  const color = isClaude ? 'amber' : 'jade';
+  const author = isClaude ? 'Claude' : 'Butter';
+  const dateStr = note.created_at ? note.created_at.substring(0, 10) : '';
+  const canDelete = !isClaude;
+  const delBtn = canDelete
+    ? '<button class="annot-panel-item-del" data-id="' + esc(note.id) + '" data-type="note" title="delete" style="position:static;margin-left:auto;flex-shrink:0">&times;</button>'
+    : '';
+  const displayText = hlText ? cleanNoteText(note.text || '', hlText) : (note.text || '');
+  const replyIcon = depth > 0 ? '<span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' : '';
+  const indent = depth > 0 ? 'padding-left:12px;' : '';
+  const replies = allNotes.filter(r => r.reply_to === note.id);
+
+  let html = `
+    <div style="display:flex;align-items:flex-start;gap:6px;padding:6px 0;border-top:0.5px solid var(--border-soft);${indent}">
+      <div style="flex:1;min-width:0">
+        <div class="annot-panel-item-author ${color}">${replyIcon}${author}</div>
+        <div class="annot-panel-item-text">${esc(displayText)}</div>
+        ${dateStr ? '<div class="annot-panel-item-date">' + dateStr + '</div>' : ''}
+      </div>
+      ${delBtn}
+    </div>`;
+
+  for (const reply of replies) {
+    html += renderNoteWithReplies(reply, allNotes, null, (depth || 0) + 1);
+  }
+  return html;
+}
+
 function renderAnnotPanel() {
   const panel = document.getElementById('annotPanelContent');
   const paraId = state.panelParaId;
@@ -429,40 +460,28 @@ function renderAnnotPanel() {
       ? '<button class="annot-panel-item-del" data-id="' + esc(hl.id) + '" data-type="highlight" title="delete highlight + notes">×</button>'
       : '';
 
-    let linkedHtml = '';
     const childNotes = linkedNotes[hl.id] || [];
-    for (const n of childNotes) {
-      const nIsClaude = n.author === 'Claude';
-      const nColor = nIsClaude ? 'amber' : 'jade';
-      const nAuthor = nIsClaude ? 'Claude' : 'Butter';
-      const nDate = n.created_at ? n.created_at.substring(0, 10) : '';
-      const nDel = !nIsClaude
-        ? '<button class="annot-panel-item-del" data-id="' + esc(n.id) + '" data-type="note" title="delete" style="position:static;margin-left:auto;flex-shrink:0">×</button>'
-        : '';
-      linkedHtml += `
-        <div style="display:flex;align-items:flex-start;gap:6px;padding:6px 0;border-top:0.5px solid var(--border-soft);">
-          <div class="annot-panel-bar ${nColor}" style="min-height:14px"></div>
-          <div style="flex:1;min-width:0">
-            <div class="annot-panel-item-author ${nColor}">${nAuthor}</div>
-            <div class="annot-panel-item-text">${esc(cleanNoteText(n.text, hl.text))}</div>
-            ${nDate ? '<div class="annot-panel-item-date">' + nDate + '</div>' : ''}
-          </div>
-          ${nDel}
-        </div>`;
+    const directChildren = childNotes.filter(n => !childNotes.some(p => p.id === n.reply_to));
+
+    let linkedHtml = '';
+    for (const n of directChildren) {
+      linkedHtml += renderNoteWithReplies(n, paraAnnots, hl.text, 0);
     }
 
     itemsHtml += `
-    <div class="annot-panel-item hl-${colorClass}" style="flex-direction:column;align-items:stretch;gap:0;position:relative">
-      <div style="display:flex;align-items:flex-start;gap:8px;">
-        <div class="annot-panel-bar ${colorClass}"></div>
-        <div class="annot-panel-item-body">
-          <div class="annot-panel-item-author ${colorClass}">${authorName}</div>
-          <div class="annot-panel-item-hl">${esc(hl.text)}</div>
-          ${dateStr ? '<div class="annot-panel-item-date">' + dateStr + '</div>' : ''}
+    <div class="annot-panel-item hl-${colorClass}" style="display:flex;align-items:stretch;gap:0;position:relative">
+      <div class="annot-panel-bar ${colorClass}" style="flex-shrink:0;width:3px;border-radius:2px;margin-right:10px"></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;">
+          <div style="flex:1;min-width:0">
+            <div class="annot-panel-item-author ${colorClass}">${authorName}</div>
+            <div class="annot-panel-item-hl">${esc(hl.text)}</div>
+            ${dateStr ? '<div class="annot-panel-item-date">' + dateStr + '</div>' : ''}
+          </div>
+          ${!childNotes.length ? delBtn : ''}
         </div>
-        ${delBtn}
+        ${linkedHtml}
       </div>
-      ${linkedHtml ? '<div style="padding-left:10px">' + linkedHtml + '</div>' : ''}
     </div>`;
   }
 
@@ -955,20 +974,60 @@ function renderDetailGrouped(items) {
     if (n.highlight_id && highlightIds.has(n.highlight_id)) {
       if (!linkedNotes[n.highlight_id]) linkedNotes[n.highlight_id] = [];
       linkedNotes[n.highlight_id].push(n);
+    } else if (n.reply_to && notes.some(p => p.id === n.reply_to)) {
+      // replies handled inside renderNoteWithReplies
     } else {
       standalone.push(n);
     }
   }
   let html = '';
   for (const hl of highlights) {
-    html += renderDetailAnnot(hl);
+    const isClaude = hl.author === 'Claude';
+    const colorVar = isClaude ? 'accent' : 'jade';
+    const authorName = isClaude ? 'Claude' : 'Butter';
+    const dateStr = hl.created_at ? hl.created_at.substring(0, 10) : '';
     const children = linkedNotes[hl.id] || [];
-    for (const note of children) {
-      html += renderDetailAnnot(note, true, hl.text);
+    const directChildren = children.filter(n => !children.some(p => p.id === n.reply_to));
+    let notesHtml = '';
+    for (const n of directChildren) {
+      notesHtml += renderDetailReply(n, notes, hl.text, 0);
     }
+    html += `<div class="annot-row" style="display:flex;align-items:stretch;gap:8px">
+      <div style="width:3px;border-radius:2px;background:var(--${colorVar});opacity:0.6;flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div class="annot-row-header">
+          <span class="annot-row-author ${isClaude?'claude':'butter'}">${authorName}</span>
+          ${dateStr ? '<span class="annot-row-date">' + dateStr + '</span>' : ''}
+        </div>
+        <div class="annot-row-highlight ${isClaude?'hl-claude':''}">${esc(hl.text||'')}</div>
+        ${notesHtml}
+      </div>
+    </div>`;
   }
   for (const note of standalone) {
     html += renderDetailAnnot(note);
+  }
+  return html;
+}
+
+function renderDetailReply(note, allNotes, hlText, depth) {
+  const isClaude = note.author === 'Claude';
+  const authorClass = isClaude ? 'claude' : 'butter';
+  const dateStr = note.created_at ? note.created_at.substring(0, 10) : '';
+  const displayText = hlText ? cleanNoteText(note.text || '', hlText) : (note.text || '');
+  const indent = depth > 0 ? 'padding-left:12px;' : '';
+  const replyIcon = depth > 0 ? '<span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' : '';
+  const replies = allNotes.filter(r => r.reply_to === note.id);
+
+  let html = `<div style="border-top:0.5px solid var(--border-soft);padding:4px 0;${indent}">
+    <div class="annot-row-header" style="margin-bottom:2px">
+      <span class="annot-row-author ${authorClass}">${replyIcon}${isClaude?'Claude':'Butter'}</span>
+      ${dateStr ? '<span class="annot-row-date">' + dateStr + '</span>' : ''}
+    </div>
+    <div class="annot-row-note">${esc(displayText)}</div>
+  </div>`;
+  for (const r of replies) {
+    html += renderDetailReply(r, allNotes, null, depth + 1);
   }
   return html;
 }
@@ -1197,29 +1256,37 @@ function renderAnnotationsOverview() {
           const isClaude = hl.author === 'Claude';
           const colorVar = isClaude ? 'accent' : 'jade';
           const authorName = isClaude ? 'Claude' : 'Butter';
-          inner += `<div class="overview-annot ${isClaude ? 'claude' : 'user'}">
-            <div class="overview-annot-author" style="color:var(--${colorVar})">${authorName}</div>
-            <div class="overview-annot-text"><span class="annot-row-highlight ${isClaude ? 'hl-claude' : ''}">${esc(hl.text || '')}</span></div>
-          </div>`;
           const children = linkedMap[hl.id] || [];
-          for (const n of children) {
+          const directChildren = children.filter(n => !children.some(p => p.id === n.reply_to));
+          let notesHtml = '';
+          for (const n of directChildren) {
             const nClaude = n.author === 'Claude';
-            const nColor = nClaude ? 'accent' : 'jade';
-            const nAuthor = nClaude ? 'Claude' : 'Butter';
             const cleaned = cleanNoteText(n.text || '', hl.text || '');
-            inner += `<div class="overview-annot ${nClaude ? 'claude' : 'user'}" style="padding-left:16px;border-left:2px solid var(--border);margin-left:4px">
-              <div class="overview-annot-text">${esc(cleaned)}</div>
-            </div>`;
+            const replies = items.filter(r => r.reply_to === n.id);
+            notesHtml += '<div style="border-top:0.5px solid var(--border-soft);padding:4px 0">';
+            notesHtml += '<div class="overview-annot-author" style="color:var(--' + (nClaude?'accent':'jade') + ')">' + (nClaude?'Claude':'Butter') + '</div>';
+            notesHtml += '<div class="overview-annot-text">' + esc(cleaned) + '</div></div>';
+            for (const r of replies) {
+              const rClaude = r.author === 'Claude';
+              notesHtml += '<div style="border-top:0.5px solid var(--border-soft);padding:4px 0 4px 12px">';
+              notesHtml += '<div class="overview-annot-author" style="color:var(--' + (rClaude?'accent':'jade') + ')"><span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' + (rClaude?'Claude':'Butter') + '</div>';
+              notesHtml += '<div class="overview-annot-text">' + esc(r.text || '') + '</div></div>';
+            }
           }
+          inner += '<div class="overview-annot ' + (isClaude?'claude':'user') + '" style="display:flex;align-items:stretch;gap:8px;border-left:none;padding-left:0">';
+          inner += '<div style="width:3px;border-radius:2px;background:var(--' + colorVar + ');opacity:0.6;flex-shrink:0"></div>';
+          inner += '<div style="flex:1;min-width:0">';
+          inner += '<div class="overview-annot-author" style="color:var(--' + colorVar + ')">' + authorName + '</div>';
+          inner += '<div class="overview-annot-text"><span class="annot-row-highlight ' + (isClaude?'hl-claude':'') + '">' + esc(hl.text || '') + '</span></div>';
+          inner += notesHtml + '</div></div>';
         }
         for (const n of standaloneNotes) {
           const nClaude = n.author === 'Claude';
           const nColor = nClaude ? 'accent' : 'jade';
           const nAuthor = nClaude ? 'Claude' : 'Butter';
-          inner += `<div class="overview-annot ${nClaude ? 'claude' : 'user'}">
-            <div class="overview-annot-author" style="color:var(--${nColor})">${nAuthor}</div>
-            <div class="overview-annot-text">${esc(n.text || '')}</div>
-          </div>`;
+          inner += '<div class="overview-annot ' + (nClaude?'claude':'user') + '">';
+          inner += '<div class="overview-annot-author" style="color:var(--' + nColor + ')">' + nAuthor + '</div>';
+          inner += '<div class="overview-annot-text">' + esc(n.text || '') + '</div></div>';
         }
         return `<div class="overview-item"><div class="overview-para">¶${pid}</div>${inner}</div>`;
       }).join('')
