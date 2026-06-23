@@ -14,6 +14,7 @@ const SVG = {
   annotations: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="2" width="14" height="16" rx="1.5"/><path d="M6 6h8M6 9h8M6 12h5"/></svg>',
   vocabList: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="2" width="14" height="16" rx="1.5"/><path d="M6 6h3M6 9h5M6 12h4"/><circle cx="13" cy="13" r="3"/><path d="M13 11.5v3M11.5 13h3"/></svg>',
   fontsize: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 15L8 5h1l4 10"/><path d="M5.5 12h6"/><path d="M14 15l2-5h.5l2 5"/><path d="M14.8 13h3.5"/></svg>',
+  pencil: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M11.5 2.5l2 2L5 13H3v-2l8.5-8.5z"/></svg>',
 };
 
 let state = {
@@ -223,6 +224,55 @@ async function deleteVocab(vid) {
   render();
 }
 
+function editVocab(vid) {
+  const entry = state.vocab.find(v => v.id === vid);
+  if (!entry) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog-box">
+      <div class="dialog-text">Edit vocab</div>
+      <input class="dialog-input" id="editVocabWord" value="${esc(entry.word || '')}" placeholder="word" style="margin-bottom:8px">
+      <input class="dialog-input" id="editVocabNote" value="${esc(entry.note || '')}" placeholder="note">
+      <div class="dialog-actions">
+        <button class="dialog-btn" onclick="this.closest('.dialog-overlay').remove()">Cancel</button>
+        <button class="dialog-btn primary" id="editVocabSave">Save</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('editVocabWord')?.focus(), 50);
+  document.getElementById('editVocabSave').addEventListener('click', async () => {
+    const word = document.getElementById('editVocabWord').value.trim();
+    const note = document.getElementById('editVocabNote').value;
+    if (!word) return;
+    const updated = await api(`/books/${state.currentBook.id}/vocab/${vid}`, {
+      method: 'PUT',
+      body: JSON.stringify({ word, note }),
+    });
+    const idx = state.vocab.findIndex(v => v.id === vid);
+    if (idx >= 0) { state.vocab[idx].word = updated.word; state.vocab[idx].note = updated.note; }
+    overlay.remove();
+    render();
+  });
+}
+
+async function jumpToVocab(paraId) {
+  if (!paraId || !state.currentBook) return;
+  const data = await api(`/books/${state.currentBook.id}/page-for/${paraId}`);
+  if (data && data.page) {
+    state.currentPage = data.page;
+    state.view = 'reading';
+    state.loading = true; render();
+    await loadPage();
+    state.loading = false; render();
+    setTimeout(() => {
+      const el = document.querySelector(`[data-pid="${paraId}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }
+}
+
 // ===== DIALOG =====
 let dialogCallback = null;
 
@@ -373,6 +423,28 @@ function renderHighlightedText(plainText, highlights) {
   }
 
   return html;
+}
+
+// Apply dotted underlines to vocab words in already-rendered HTML
+// Works by splitting on HTML tags and only replacing in text segments
+function applyVocabUnderlines(html, words) {
+  if (!words || words.length === 0) return html;
+  // Sort longer words first to avoid partial matches
+  const sorted = [...words].sort((a, b) => b.length - a.length);
+  // Build regex matching any vocab word (case-insensitive, word boundary)
+  const pattern = new RegExp(
+    '(' + sorted.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')',
+    'gi'
+  );
+  // Split HTML into tags and text segments
+  const parts = html.split(/(<[^>]+>)/);
+  for (let i = 0; i < parts.length; i++) {
+    // Only process text nodes (odd indices are tags)
+    if (i % 2 === 0 && parts[i]) {
+      parts[i] = parts[i].replace(pattern, '<span class="vocab-underline">$1</span>');
+    }
+  }
+  return parts.join('');
 }
 
 // ===== ANNOTATION PANEL =====
@@ -971,11 +1043,11 @@ function renderDetailGrouped(items) {
   const linkedNotes = {};
   const standalone = [];
   for (const n of notes) {
-    if (n.highlight_id && highlightIds.has(n.highlight_id)) {
+    if (n.reply_to && notes.some(p => p.id === n.reply_to)) {
+      // replies handled inside renderDetailReply - check before highlight_id
+    } else if (n.highlight_id && highlightIds.has(n.highlight_id)) {
       if (!linkedNotes[n.highlight_id]) linkedNotes[n.highlight_id] = [];
       linkedNotes[n.highlight_id].push(n);
-    } else if (n.reply_to && notes.some(p => p.id === n.reply_to)) {
-      // replies handled inside renderNoteWithReplies
     } else {
       standalone.push(n);
     }
@@ -1180,7 +1252,13 @@ function renderParagraphs() {
     }
 
     // Render text with inline highlights
-    const textHtml = renderHighlightedText(p.text, paraHighlights);
+    let textHtml = renderHighlightedText(p.text, paraHighlights);
+
+    // Apply vocab word dotted underlines
+    const vocabWords = (state.vocab || []).filter(v => v.paragraph_id === pid).map(v => v.word);
+    if (vocabWords.length > 0) {
+      textHtml = applyVocabUnderlines(textHtml, vocabWords);
+    }
 
     const classes = ['paragraph'];
     if (isBookmarked) classes.push('bookmarked');
@@ -1312,8 +1390,9 @@ function renderVocabPage() {
           <div class="vocab-entry-body">
             <div class="vocab-word">${esc(v.word)}</div>
             ${v.note ? `<div class="vocab-note">${esc(v.note)}</div>` : ''}
-            ${v.paragraph_id ? `<div class="vocab-source">¶${v.paragraph_id}</div>` : ''}
+            ${v.paragraph_id ? `<div class="vocab-source" onclick="jumpToVocab(${v.paragraph_id})">¶${v.paragraph_id}</div>` : ''}
           </div>
+          <button class="vocab-edit" onclick="editVocab('${v.id}')">${SVG.pencil}</button>
           <button class="vocab-delete" onclick="deleteVocab('${v.id}')">${SVG.x}</button>
         </div>`).join('')
     }

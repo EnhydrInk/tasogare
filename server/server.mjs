@@ -584,6 +584,7 @@ app.put("/api/books/:id/vocab/:vocabId", async (req, res) => {
       const entry = (book.vocab || []).find(v => v.id === req.params.vocabId);
       if (!entry) return { status: 404, body: { error: "Vocab entry not found" } };
       if (req.body.note !== undefined) entry.note = req.body.note;
+      if (req.body.word !== undefined) entry.word = req.body.word.trim();
       saveBook(book);
       return { status: 200, body: entry };
     });

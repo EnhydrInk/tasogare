@@ -1107,6 +1107,19 @@ mark.hl-both:hover {
 }
 .vocab-source:hover { color: var(--accent); }
 
+.vocab-edit {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--ink4);
+  font-size: 9px;
+  padding: 4px;
+  transition: color 0.2s var(--ease);
+  flex-shrink: 0;
+}
+.vocab-edit:hover { color: var(--accent); }
+.vocab-edit svg { width: 14px; height: 14px; }
+
 .vocab-delete {
   border: none;
   background: none;
@@ -1118,6 +1131,13 @@ mark.hl-both:hover {
   flex-shrink: 0;
 }
 .vocab-delete:hover { color: var(--vermillion); }
+
+.vocab-underline {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--ink4);
+  text-underline-offset: 2px;
+}
 
 /* ===== EMPTY STATE ===== */
 .empty-state {
