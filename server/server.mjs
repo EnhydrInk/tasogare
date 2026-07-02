@@ -7,19 +7,25 @@ import multer from "multer";
 import { randomUUID, createHash } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync } from "fs";
 import { execFileSync } from "child_process";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { z } from "zod";
 import iconv from "iconv-lite";
 
 process.on("uncaughtException", (err) => { console.error("UNCAUGHT:", err.stack || err.message); });
 process.on("unhandledRejection", (err) => { console.error("UNHANDLED:", err.stack || err.message); });
 
-const PORT = 3300;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PORT = parseInt(process.env.PORT || "18008", 10);
+const HOST = process.env.HOST || "127.0.0.1";
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
-const DATA_DIR = "/opt/marginalia/data";
-const UPLOAD_DIR = "/opt/marginalia/uploads";
-const EXTRACT_SCRIPT = "/opt/marginalia/extract_pdf.py";
-const EXTRACT_EPUB = "/opt/marginalia/extract_epub.py";
+const DATA_DIR = process.env.DATA_DIR || "/opt/tasogare/data";
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "/opt/tasogare/uploads";
+const EXTRACT_SCRIPT = join(__dirname, "extract_pdf.py");
+const EXTRACT_EPUB = join(__dirname, "extract_epub.py");
+// InKieran 事件推送（不设 = 关闭；fire-and-forget，永不阻塞主流程）
+const INKIERAN_PUSH_URL = process.env.INKIERAN_PUSH_URL || "";
+const INKIERAN_PUSH_TOKEN = process.env.INKIERAN_PUSH_TOKEN || "";
 const TARGET_CHARS = 800;
 
 [DATA_DIR, UPLOAD_DIR].forEach(d => { if (!existsSync(d)) mkdirSync(d, { recursive: true }); });
@@ -33,6 +39,25 @@ async function withFileLock(file, fn) {
   try { return await current; } finally {
     if (fileLocks.get(file) === current) fileLocks.delete(file);
   }
+}
+
+// --- InKieran 事件推送 ---
+function pushEvent(event) {
+  if (!INKIERAN_PUSH_URL) return;
+  const headers = { "Content-Type": "application/json" };
+  if (INKIERAN_PUSH_TOKEN) headers.Authorization = `Bearer ${INKIERAN_PUSH_TOKEN}`;
+  fetch(INKIERAN_PUSH_URL, {
+    method: "POST", headers,
+    body: JSON.stringify({ source: "tasogare", at: new Date().toISOString(), ...event }),
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
+}
+
+function todayJST() {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
+}
+function jstDay(iso) {
+  return iso ? new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : null;
 }
 
 // --- Data helpers ---
@@ -93,7 +118,7 @@ function getPageForParagraph(book, paraId) {
 function listBooks() {
   if (!existsSync(DATA_DIR)) return [];
   return readdirSync(DATA_DIR)
-    .filter(f => f.endsWith(".json") && f !== "visitor_count.json")
+    .filter(f => f.endsWith(".json"))
     .map(f => {
       try {
         const b = JSON.parse(readFileSync(`${DATA_DIR}/${f}`, "utf-8"));
@@ -127,9 +152,32 @@ function getPage(book, pageNum) {
   return { page: pageNum, total_pages: book.pages.length, paragraphs: paras };
 }
 
+function readingStatus() {
+  const day = todayJST();
+  const books = [];
+  let total = 0;
+  for (const meta of listBooks()) {
+    const book = loadBook(meta.id);
+    if (!book) continue;
+    const seconds = book.reading_log?.[day] || 0;
+    const annotations_today = (book.annotations || []).filter(a => jstDay(a.created_at) === day).length;
+    const vocab_today = (book.vocab || []).filter(v => jstDay(v.created_at) === day).length;
+    if (!seconds && !annotations_today && !vocab_today) continue;
+    ensurePages(book);
+    total += seconds;
+    books.push({
+      id: book.id, title: book.title, seconds,
+      page: book.progress?.page || 0, total_pages: book.pages.length,
+      annotations_today, vocab_today,
+      last_active_at: book.last_active_at || book.progress?.updated_at || null,
+    });
+  }
+  return { date: day, total_seconds: total, books };
+}
+
 // --- MCP Server ---
 function createMcp() {
-  const server = new McpServer({ name: "book", version: "1.0.0" });
+  const server = new McpServer({ name: "tasogare", version: "1.0.0" });
 
   server.tool("list_books", "书架列表", {}, async () => {
     const books = listBooks();
@@ -157,7 +205,7 @@ function createMcp() {
 
   server.tool("read_annotations", "读取批注", {
     book_id: z.string().describe("书籍ID"),
-    author: z.string().optional().describe("筛选作者: 乖乖 或 Claude"),
+    author: z.string().optional().describe("筛选作者: 音音 或 克先生"),
     context_size: z.number().optional().describe("上下文段落数，默认3"),
   }, async ({ book_id, author, context_size }) => {
     const book = loadBook(book_id);
@@ -181,7 +229,7 @@ function createMcp() {
     return { content: [{ type: "text", text }] };
   });
 
-  server.tool("write_comment", "Claude写评论", {
+  server.tool("write_comment", "克先生写评论", {
     book_id: z.string().describe("书籍ID"),
     paragraph_id: z.number().describe("段落编号"),
     content: z.string().describe("评论内容"),
@@ -199,18 +247,19 @@ function createMcp() {
         paragraph_id,
         type: "note",
         text: content,
-        author: "Claude",
+        author: "克先生",
         reply_to: reply_to || null,
         highlight_id: highlight_id || null,
         created_at: new Date().toISOString(),
       };
       book.annotations.push(annot);
       saveBook(book);
+      pushEvent({ type: "note", author: "克先生", book_id, book_title: book.title, paragraph_id, text: content.slice(0, 200) });
       return { content: [{ type: "text", text: `已在 §${paragraph_id} 留下评论：${content.slice(0, 50)}...` }] };
     });
   });
 
-  server.tool("highlight_text", "Claude画荧光笔高亮", {
+  server.tool("highlight_text", "克先生画荧光笔高亮", {
     book_id: z.string().describe("书籍ID"),
     paragraph_id: z.number().describe("段落编号"),
     text: z.string().describe("要高亮的原文片段（必须是段落中的原文）"),
@@ -227,12 +276,13 @@ function createMcp() {
         paragraph_id,
         type: "highlight",
         text,
-        author: "Claude",
+        author: "克先生",
         reply_to: null,
         created_at: new Date().toISOString(),
       };
       book.annotations.push(annot);
       saveBook(book);
+      pushEvent({ type: "highlight", author: "克先生", book_id, book_title: book.title, paragraph_id, text: text.slice(0, 200) });
       return { content: [{ type: "text", text: `已高亮 §${paragraph_id}：「${text.slice(0, 40)}…」` }] };
     });
   });
@@ -253,12 +303,84 @@ function createMcp() {
   });
 
 
+  server.tool("read_vocab", "读生词本", {
+    book_id: z.string().describe("书籍ID"),
+  }, async ({ book_id }) => {
+    const book = loadBook(book_id);
+    if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
+    const vocab = book.vocab || [];
+    if (vocab.length === 0) return { content: [{ type: "text", text: "生词本是空的。" }] };
+    const text = `《${book.title}》生词本（${vocab.length}词）\n\n` + vocab.map(v => {
+      const para = book.paragraphs.find(p => p.id === v.paragraph_id);
+      const ctx = para ? `\n  出处 [§${para.id}]: ${para.text.slice(0, 120)}` : "";
+      return `• ${v.word} (ID: ${v.id})${v.note ? `\n  注: ${v.note}` : "\n  （还没有注解）"}${ctx}`;
+    }).join("\n\n");
+    return { content: [{ type: "text", text }] };
+  });
+
+  server.tool("annotate_vocab", "克先生给生词写注解（词义/例句/词源）", {
+    book_id: z.string().describe("书籍ID"),
+    vocab_id: z.string().describe("生词ID"),
+    note: z.string().describe("注解内容"),
+  }, async ({ book_id, vocab_id, note }) => {
+    return withFileLock(bookPath(book_id), async () => {
+      const book = loadBook(book_id);
+      if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
+      const entry = (book.vocab || []).find(v => v.id === vocab_id);
+      if (!entry) return { content: [{ type: "text", text: "找不到这个生词。" }] };
+      entry.note = note;
+      entry.note_author = "克先生";
+      saveBook(book);
+      return { content: [{ type: "text", text: `已给「${entry.word}」写注解。` }] };
+    });
+  });
+
+  server.tool("recent_activity", "最近的划线/批注/生词动态（共读追进度用）", {
+    hours: z.number().optional().describe("时间窗口小时数,默认24"),
+    author: z.string().optional().describe("筛选作者: 音音 或 克先生"),
+  }, async ({ hours, author }) => {
+    const cutoff = Date.now() - (hours || 24) * 3600 * 1000;
+    const sections = [];
+    for (const meta of listBooks()) {
+      const book = loadBook(meta.id);
+      if (!book) continue;
+      let annots = (book.annotations || []).filter(a => new Date(a.created_at).getTime() >= cutoff);
+      if (author) annots = annots.filter(a => a.author === author);
+      const vocab = author && author !== "音音" ? [] : (book.vocab || []).filter(v => new Date(v.created_at).getTime() >= cutoff);
+      if (!annots.length && !vocab.length) continue;
+      const lines = [`《${book.title}》(ID: ${book.id})`];
+      for (const a of annots) {
+        const para = book.paragraphs.find(p => p.id === a.paragraph_id);
+        if (a.type === "highlight") {
+          lines.push(`  📌 ${a.author} 划线 [§${a.paragraph_id}]:「${a.text}」`);
+        } else {
+          lines.push(`  💬 ${a.author} 批注 [§${a.paragraph_id}]: ${a.text}${para ? `\n     原文: ${para.text.slice(0, 100)}` : ""}`);
+        }
+      }
+      for (const v of vocab) lines.push(`  📖 生词「${v.word}」${v.note ? ` — ${v.note}` : ""}`);
+      sections.push(lines.join("\n"));
+    }
+    if (!sections.length) return { content: [{ type: "text", text: "这段时间没有新动态。" }] };
+    return { content: [{ type: "text", text: sections.join("\n\n") }] };
+  });
+
+  server.tool("reading_status", "今天的阅读时长与进度", {}, async () => {
+    const st = readingStatus();
+    if (!st.books.length) return { content: [{ type: "text", text: `今天（${st.date}）还没翻书。` }] };
+    const mins = Math.round(st.total_seconds / 60);
+    const lines = st.books.map(b =>
+      `《${b.title}》 ${Math.round(b.seconds / 60)}分钟 · 第${b.page}/${b.total_pages}页` +
+      (b.annotations_today ? ` · 批注/划线+${b.annotations_today}` : "") +
+      (b.vocab_today ? ` · 生词+${b.vocab_today}` : ""));
+    return { content: [{ type: "text", text: `今天（${st.date}）共读书 ${mins} 分钟\n` + lines.join("\n") }] };
+  });
+
   return server;
 }
 
 // --- Express ---
 const app = express();
-const upload = multer({ dest: "/opt/marginalia/uploads", limits: { fileSize: 150 * 1024 * 1024 } });
+const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 150 * 1024 * 1024 } });
 app.use((req, res, next) => { console.log(`[DEBUG] ${req.method} ${req.path}`); next(); });
 
 function makeBook(id, title, filename, paragraphs) {
@@ -436,17 +558,44 @@ app.post("/api/books/:id/annotations", async (req, res) => {
         paragraph_id,
         type: type || "highlight",
         text: text || "",
-        author: req.body.author || "乖乖",
+        author: req.body.author || "音音",
         reply_to: null,
         highlight_id: highlight_id || null,
         created_at: new Date().toISOString(),
       };
       book.annotations.push(annot);
       saveBook(book);
+      const para = book.paragraphs.find(p => p.id === paragraph_id);
+      pushEvent({
+        type: annot.type, author: annot.author, book_id: book.id, book_title: book.title,
+        paragraph_id, text: (annot.text || "").slice(0, 200),
+        paragraph_text: (para?.text || "").slice(0, 200),
+      });
       return { status: 200, body: annot };
     });
     res.status(result.status).json(result.body);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/books/:id/reading-ping", async (req, res) => {
+  try {
+    const result = await withFileLock(bookPath(req.params.id), async () => {
+      const book = loadBook(req.params.id);
+      if (!book) return { status: 404, body: { error: "Not found" } };
+      const secs = Math.min(300, Math.max(0, parseInt(req.body.seconds) || 60));
+      if (!book.reading_log) book.reading_log = {};
+      const day = todayJST();
+      book.reading_log[day] = (book.reading_log[day] || 0) + secs;
+      book.last_active_at = new Date().toISOString();
+      saveBook(book);
+      return { status: 200, body: { ok: true, today_seconds: book.reading_log[day] } };
+    });
+    res.status(result.status).json(result.body);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/reading-status", (req, res) => {
+  res.json(readingStatus());
 });
 
 app.put("/api/books/:id/progress", async (req, res) => {
@@ -548,6 +697,7 @@ app.post("/api/books/:id/vocab", async (req, res) => {
       };
       book.vocab.push(entry);
       saveBook(book);
+      pushEvent({ type: "vocab", author: "音音", book_id: book.id, book_title: book.title, word: entry.word });
       return { status: 200, body: entry };
     });
     res.status(result.status).json(result.body);
@@ -612,7 +762,7 @@ app.delete("/api/books/:id", async (req, res) => {
 
 // --- Re-index endpoint (one-time migration) ---
 app.post("/api/reindex", (req, res) => {
-  const files = readdirSync(DATA_DIR).filter(f => f.endsWith(".json") && f !== "visitor_count.json");
+  const files = readdirSync(DATA_DIR).filter(f => f.endsWith(".json"));
   let count = 0;
   for (const f of files) {
     try {
@@ -636,8 +786,8 @@ function externalBaseUrl(req) {
 function mcpResourceMetadata(req) {
   const baseUrl = externalBaseUrl(req);
   return {
-    resource: `${baseUrl}/marginalia/mcp`,
-    resource_name: "Marginalia",
+    resource: `${baseUrl}/mcp`,
+    resource_name: "Tasogare",
     bearer_methods_supported: ["header"],
     scopes_supported: [],
     authorization_servers: [externalBaseUrl(req)],
@@ -763,7 +913,7 @@ app.get("/mcp/sse", async (req, res) => {
     return;
   }
   const mcpServer = createMcp();
-  const transport = new SSEServerTransport("/marginalia/mcp/messages", res);
+  const transport = new SSEServerTransport("/mcp/messages", res);
   transports[transport.sessionId] = { transport, mcpServer };
   res.on("close", () => { mcpServer.close(); delete transports[transport.sessionId]; });
   await mcpServer.connect(transport);
@@ -776,26 +926,8 @@ app.post("/mcp/messages", async (req, res) => {
   await session.transport.handlePostMessage(req, res, req.body);
 });
 
-app.get("/health", (req, res) => res.json({ status: "ok", service: "marginalia" }));
+app.get("/health", (req, res) => res.json({ status: "ok", service: "tasogare" }));
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Marginalia on 127.0.0.1:${PORT}`));
+app.use(express.static(join(__dirname, "..", "client")));
 
-// --- Visitor Counter ---
-const COUNTER_FILE = "/opt/marginalia/data/visitor_count.json";
-function getVisitorCount() {
-  try { return JSON.parse(readFileSync(COUNTER_FILE, "utf-8")).count || 0; } catch { return 42; }
-}
-function incVisitorCount() {
-  const c = getVisitorCount() + 1;
-  const tmp = COUNTER_FILE + '.tmp';
-  writeFileSync(tmp, JSON.stringify({ count: c }), "utf-8");
-  renameSync(tmp, COUNTER_FILE);
-  return c;
-}
-app.get("/api/visitor-count", (req, res) => {
-  res.json({ count: getVisitorCount() });
-});
-app.post("/api/visitor-count", (req, res) => {
-  const count = incVisitorCount();
-  res.json({ count });
-});
+app.listen(PORT, HOST, () => console.log(`Tasogare on ${HOST}:${PORT}`));

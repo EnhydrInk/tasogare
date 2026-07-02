@@ -23,10 +23,10 @@
   --font-mono: 'DM Mono', 'Courier New', monospace;
   --radius: 4px;
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --hl-butter: rgba(74,110,74,0.18);
-  --hl-butter-strong: rgba(74,110,74,0.28);
-  --hl-claude: rgba(168,90,26,0.16);
-  --hl-claude-strong: rgba(168,90,26,0.26);
+  --hl-yinyin: rgba(74,110,74,0.18);
+  --hl-yinyin-strong: rgba(74,110,74,0.28);
+  --hl-kieran: rgba(168,90,26,0.16);
+  --hl-kieran-strong: rgba(168,90,26,0.26);
   --reader-font-size: 17px;
 }
 
@@ -50,10 +50,10 @@
   --border-soft: rgba(156,138,108,0.20);
   --border-strong: rgba(156,138,108,0.50);
   --rule: rgba(156,138,108,0.45);
-  --hl-butter: rgba(124,160,106,0.20);
-  --hl-butter-strong: rgba(124,160,106,0.32);
-  --hl-claude: rgba(200,134,74,0.18);
-  --hl-claude-strong: rgba(200,134,74,0.30);
+  --hl-yinyin: rgba(124,160,106,0.20);
+  --hl-yinyin-strong: rgba(124,160,106,0.32);
+  --hl-kieran: rgba(200,134,74,0.18);
+  --hl-kieran-strong: rgba(200,134,74,0.30);
 }
 
 /* ===== RESET ===== */
@@ -484,8 +484,8 @@ body {
   font-size: 9px;
   font-weight: 500;
 }
-.annot-row-author.butter { color: var(--jade); }
-.annot-row-author.claude { color: var(--accent); }
+.annot-row-author.yinyin { color: var(--jade); }
+.annot-row-author.kieran { color: var(--accent); }
 
 .annot-row-date {
   font-family: var(--font-mono);
@@ -504,9 +504,9 @@ body {
   display: inline;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  background: var(--hl-butter-strong);
+  background: var(--hl-yinyin-strong);
 }
-.annot-row-highlight.hl-claude { background: var(--hl-claude-strong); }
+.annot-row-highlight.hl-kieran { background: var(--hl-kieran-strong); }
 
 .annot-row-note {
   font-family: var(--font-display);
@@ -620,11 +620,11 @@ body {
 
 
 /* ===== ANNOTATION COLOR BAR (left border) ===== */
-.paragraph.has-butter {
+.paragraph.has-yinyin {
   border-left: 2px solid var(--jade);
   padding-left: 18px;
 }
-.paragraph.has-claude {
+.paragraph.has-kieran {
   border-left: 2px solid var(--accent);
   padding-left: 18px;
 }
@@ -634,10 +634,10 @@ body {
   padding-left: 18px;
 }
 /* bookmarked + annotation: annotation bar wins */
-.paragraph.bookmarked.has-butter {
+.paragraph.bookmarked.has-yinyin {
   border-left: 2px solid var(--jade);
 }
-.paragraph.bookmarked.has-claude {
+.paragraph.bookmarked.has-kieran {
   border-left: 2px solid var(--accent);
 }
 .paragraph.bookmarked.has-both {
@@ -654,25 +654,25 @@ mark.hl {
   position: relative;
 }
 
-mark.hl-butter {
-  background: var(--hl-butter);
+mark.hl-yinyin {
+  background: var(--hl-yinyin);
 }
-mark.hl-butter:hover {
-  background: var(--hl-butter-strong);
+mark.hl-yinyin:hover {
+  background: var(--hl-yinyin-strong);
 }
 
-mark.hl-claude {
-  background: var(--hl-claude);
+mark.hl-kieran {
+  background: var(--hl-kieran);
 }
-mark.hl-claude:hover {
-  background: var(--hl-claude-strong);
+mark.hl-kieran:hover {
+  background: var(--hl-kieran-strong);
 }
 
 mark.hl-both {
-  background: linear-gradient(180deg, var(--hl-butter) 50%, var(--hl-claude) 50%);
+  background: linear-gradient(180deg, var(--hl-yinyin) 50%, var(--hl-kieran) 50%);
 }
 mark.hl-both:hover {
-  background: linear-gradient(180deg, var(--hl-butter-strong) 50%, var(--hl-claude-strong) 50%);
+  background: linear-gradient(180deg, var(--hl-yinyin-strong) 50%, var(--hl-kieran-strong) 50%);
 }
 
 /* ===== FLOATING SELECTION TOOLBAR ===== */
@@ -872,8 +872,8 @@ mark.hl-both:hover {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
-.annot-panel-item.hl-jade .annot-panel-item-hl { background: var(--hl-butter-strong); }
-.annot-panel-item.hl-amber .annot-panel-item-hl { background: var(--hl-claude-strong); }
+.annot-panel-item.hl-jade .annot-panel-item-hl { background: var(--hl-yinyin-strong); }
+.annot-panel-item.hl-amber .annot-panel-item-hl { background: var(--hl-kieran-strong); }
 
 .annot-panel-item-date {
   font-family: var(--font-mono);
@@ -1053,7 +1053,7 @@ mark.hl-both:hover {
   border-left: 2px solid transparent;
 }
 .overview-annot.user { border-left-color: var(--jade); }
-.overview-annot.claude { border-left-color: var(--accent); }
+.overview-annot.kieran { border-left-color: var(--accent); }
 
 .overview-annot-author {
   font-family: var(--font-mono);
@@ -1390,7 +1390,7 @@ mark.hl-both:hover {
   line-height: 1.5;
 }
 .search-result-text mark {
-  background: var(--hl-butter-strong);
+  background: var(--hl-yinyin-strong);
   color: var(--ink1);
   border-radius: 2px;
   padding: 0 1px;

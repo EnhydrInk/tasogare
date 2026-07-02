@@ -1,4 +1,4 @@
-const API = '/marginalia/api';
+const API = '/api';
 const PAGES_SIZE = 30;
 
 const SVG = {
@@ -26,7 +26,7 @@ let state = {
   paragraphs: [],
   annotations: [],
   bookmark: null,
-  nightMode: localStorage.getItem('marginalia-night') === '1',
+  nightMode: localStorage.getItem('tasogare-night') === '1',
   loading: false,
   vocab: [],
   toc: [],
@@ -383,14 +383,14 @@ function renderHighlightedText(plainText, highlights) {
 
   for (const r of ranges) {
     for (let i = r.start; i < r.end; i++) {
-      const isClaude = r.author === 'Claude';
+      const isKieran = r.author === '克先生';
       if (charMap[i] === null) {
-        charMap[i] = isClaude ? 'claude' : 'butter';
+        charMap[i] = isKieran ? 'kieran' : 'yinyin';
         charAnnotIds[i] = [r.id];
-      } else if (charMap[i] === 'claude' && !isClaude) {
+      } else if (charMap[i] === 'kieran' && !isKieran) {
         charMap[i] = 'both';
         charAnnotIds[i].push(r.id);
-      } else if (charMap[i] === 'butter' && isClaude) {
+      } else if (charMap[i] === 'yinyin' && isKieran) {
         charMap[i] = 'both';
         charAnnotIds[i].push(r.id);
       } else {
@@ -469,11 +469,11 @@ function closeAnnotPanel() {
 
 function renderNoteWithReplies(note, allNotes, hlText, depth) {
   depth = depth || 0;
-  const isClaude = note.author === 'Claude';
-  const color = isClaude ? 'amber' : 'jade';
-  const author = isClaude ? 'Claude' : 'Butter';
+  const isKieran = note.author === '克先生';
+  const color = isKieran ? 'amber' : 'jade';
+  const author = isKieran ? '克先生' : '音音';
   const dateStr = note.created_at ? note.created_at.substring(0, 10) : '';
-  const canDelete = !isClaude;
+  const canDelete = !isKieran;
   const delBtn = canDelete
     ? '<button class="annot-panel-item-del" data-id="' + esc(note.id) + '" data-type="note" title="delete" style="position:static;margin-left:auto;flex-shrink:0">&times;</button>'
     : '';
@@ -524,11 +524,11 @@ function renderAnnotPanel() {
 
   // Render each highlight as a card with linked notes
   for (const hl of highlights) {
-    const isClaude = hl.author === 'Claude';
-    const colorClass = isClaude ? 'amber' : 'jade';
-    const authorName = isClaude ? 'Claude' : 'Butter';
+    const isKieran = hl.author === '克先生';
+    const colorClass = isKieran ? 'amber' : 'jade';
+    const authorName = isKieran ? '克先生' : '音音';
     const dateStr = hl.created_at ? hl.created_at.substring(0, 10) : '';
-    const canDelete = !isClaude;
+    const canDelete = !isKieran;
     const delBtn = canDelete
       ? '<button class="annot-panel-item-del" data-id="' + esc(hl.id) + '" data-type="highlight" title="delete highlight + notes">×</button>'
       : '';
@@ -560,11 +560,11 @@ function renderAnnotPanel() {
 
   // Render standalone notes
   for (const a of standaloneNotes) {
-    const isClaude = a.author === 'Claude';
-    const colorClass = isClaude ? 'amber' : 'jade';
-    const authorName = isClaude ? 'Claude' : 'Butter';
+    const isKieran = a.author === '克先生';
+    const colorClass = isKieran ? 'amber' : 'jade';
+    const authorName = isKieran ? '克先生' : '音音';
     const dateStr = a.created_at ? a.created_at.substring(0, 10) : '';
-    const canDelete = !isClaude;
+    const canDelete = !isKieran;
     const delBtn = canDelete
       ? '<button class="annot-panel-item-del" data-id="' + esc(a.id) + '" data-type="note" title="delete">×</button>'
       : '';
@@ -667,7 +667,7 @@ function initSelectionHandler() {
     if (!text || !paraId) return;
 
     const existingHl = state.annotations.find(
-      a => a.type === 'highlight' && a.text === text && a.paragraph_id === paraId && a.author !== 'Claude'
+      a => a.type === 'highlight' && a.text === text && a.paragraph_id === paraId && a.author !== '克先生'
     );
 
     if (existingHl) {
@@ -791,7 +791,7 @@ function getParaIdFromSelection(sel) {
 // ===== NIGHT MODE =====
 function toggleNight() {
   state.nightMode = !state.nightMode;
-  localStorage.setItem('marginalia-night', state.nightMode ? '1' : '0');
+  localStorage.setItem('tasogare-night', state.nightMode ? '1' : '0');
   render();
 }
 
@@ -897,7 +897,7 @@ function renderShelf() {
           <button class="nav-btn" onclick="document.getElementById('fileInput').click()">${SVG.plus} Upload</button>
         </div>
       </div>
-      <div class="page-title">Marginalia</div>
+      <div class="page-title">Tasogare</div>
       <div class="page-subtitle"><span class="dash">—— </span>the reading room · ${state.books.length} books</div>
       <div class="header-rule"></div>
     </div>
@@ -937,11 +937,11 @@ function renderDetail() {
   const totalPages = b.total_pages || 0;
   const myPct = totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0;
 
-  const claudeAnnots = state.detailAnnotations.filter(a => a.author === 'Claude');
-  const claudeMaxPara = claudeAnnots.length > 0 ? Math.max(...claudeAnnots.map(a => a.paragraph_id)) : 0;
+  const kieranAnnots = state.detailAnnotations.filter(a => a.author === '克先生');
+  const kieranMaxPara = kieranAnnots.length > 0 ? Math.max(...kieranAnnots.map(a => a.paragraph_id)) : 0;
   const paraCount = b.paragraph_count || 0;
-  const claudePct = paraCount > 0 ? Math.min(100, Math.round((claudeMaxPara / paraCount) * 100)) : 0;
-  const hasClaudeProgress = claudeMaxPara > 0;
+  const kieranPct = paraCount > 0 ? Math.min(100, Math.round((kieranMaxPara / paraCount) * 100)) : 0;
+  const hasKieranProgress = kieranMaxPara > 0;
 
   const grouped = {};
   state.detailAnnotations.forEach(a => {
@@ -983,18 +983,18 @@ function renderDetail() {
       </div>
       <div class="progress-row">
         <div class="progress-row-header">
-          <span class="progress-label">Butter</span>
+          <span class="progress-label">音音</span>
           <span class="progress-pct jade">p.${currentPage} · ${myPct}%</span>
         </div>
         <div class="bar-gauge"><div class="bar-gauge-fill jade" style="width:${myPct}%"></div></div>
       </div>
-      ${hasClaudeProgress ? `
+      ${hasKieranProgress ? `
       <div class="progress-row" style="margin-top:12px">
         <div class="progress-row-header">
-          <span class="progress-label">Claude</span>
-          <span class="progress-pct amber">~${claudePct}%</span>
+          <span class="progress-label">克先生</span>
+          <span class="progress-pct amber">~${kieranPct}%</span>
         </div>
-        <div class="bar-gauge"><div class="bar-gauge-fill amber" style="width:${claudePct}%"></div></div>
+        <div class="bar-gauge"><div class="bar-gauge-fill amber" style="width:${kieranPct}%"></div></div>
       </div>` : ''}
     </div>
 
@@ -1055,9 +1055,9 @@ function renderDetailGrouped(items) {
   }
   let html = '';
   for (const hl of highlights) {
-    const isClaude = hl.author === 'Claude';
-    const colorVar = isClaude ? 'accent' : 'jade';
-    const authorName = isClaude ? 'Claude' : 'Butter';
+    const isKieran = hl.author === '克先生';
+    const colorVar = isKieran ? 'accent' : 'jade';
+    const authorName = isKieran ? '克先生' : '音音';
     const dateStr = hl.created_at ? hl.created_at.substring(0, 10) : '';
     const children = linkedNotes[hl.id] || [];
     const directChildren = children.filter(n => !children.some(p => p.id === n.reply_to));
@@ -1069,10 +1069,10 @@ function renderDetailGrouped(items) {
       <div style="width:3px;border-radius:2px;background:var(--${colorVar});opacity:0.6;flex-shrink:0"></div>
       <div style="flex:1;min-width:0">
         <div class="annot-row-header">
-          <span class="annot-row-author ${isClaude?'claude':'butter'}">${authorName}</span>
+          <span class="annot-row-author ${isKieran?'kieran':'yinyin'}">${authorName}</span>
           ${dateStr ? '<span class="annot-row-date">' + dateStr + '</span>' : ''}
         </div>
-        <div class="annot-row-highlight ${isClaude?'hl-claude':''}">${esc(hl.text||'')}</div>
+        <div class="annot-row-highlight ${isKieran?'hl-kieran':''}">${esc(hl.text||'')}</div>
         ${notesHtml}
       </div>
     </div>`;
@@ -1084,8 +1084,8 @@ function renderDetailGrouped(items) {
 }
 
 function renderDetailReply(note, allNotes, hlText, depth) {
-  const isClaude = note.author === 'Claude';
-  const authorClass = isClaude ? 'claude' : 'butter';
+  const isKieran = note.author === '克先生';
+  const authorClass = isKieran ? 'kieran' : 'yinyin';
   const dateStr = note.created_at ? note.created_at.substring(0, 10) : '';
   const displayText = hlText ? cleanNoteText(note.text || '', hlText) : (note.text || '');
   const indent = depth > 0 ? 'padding-left:12px;' : '';
@@ -1094,7 +1094,7 @@ function renderDetailReply(note, allNotes, hlText, depth) {
 
   let html = `<div style="border-top:0.5px solid var(--border-soft);padding:4px 0;${indent}">
     <div class="annot-row-header" style="margin-bottom:2px">
-      <span class="annot-row-author ${authorClass}">${replyIcon}${isClaude?'Claude':'Butter'}</span>
+      <span class="annot-row-author ${authorClass}">${replyIcon}${isKieran?'克先生':'音音'}</span>
       ${dateStr ? '<span class="annot-row-date">' + dateStr + '</span>' : ''}
     </div>
     <div class="annot-row-note">${esc(displayText)}</div>
@@ -1106,14 +1106,14 @@ function renderDetailReply(note, allNotes, hlText, depth) {
 }
 
 function renderDetailAnnot(a, isLinked, parentHlText) {
-  const isClaude = a.author === 'Claude';
-  const colorVar = isClaude ? 'accent' : 'jade';
-  const authorName = isClaude ? 'Claude' : 'Butter';
+  const isKieran = a.author === '克先生';
+  const colorVar = isKieran ? 'accent' : 'jade';
+  const authorName = isKieran ? '克先生' : '音音';
   const dateStr = a.created_at ? a.created_at.substring(0, 10) : '';
 
   let bodyHtml = '';
   if (a.type === 'highlight' && a.text) {
-    bodyHtml = `<div class="annot-row-highlight ${isClaude ? "hl-claude" : ""}">${esc(a.text)}</div>`;
+    bodyHtml = `<div class="annot-row-highlight ${isKieran ? "hl-kieran" : ""}">${esc(a.text)}</div>`;
   } else if (a.type === 'highlight') {
     bodyHtml = `<div style="font-family:var(--font-mono);font-size:9px;color:var(--ink4);font-weight:300">highlight</div>`;
   } else if (a.text) {
@@ -1126,7 +1126,7 @@ function renderDetailAnnot(a, isLinked, parentHlText) {
     <div style="width:3px;border-radius:2px;background:var(--${colorVar});opacity:0.6;flex-shrink:0"></div>
     <div style="flex:1;min-width:0">
       <div class="annot-row-header">
-        <span class="annot-row-author ${isClaude?'claude':'butter'}">${authorName}</span>
+        <span class="annot-row-author ${isKieran?'kieran':'yinyin'}">${authorName}</span>
         ${dateStr ? `<span class="annot-row-date">${dateStr}</span>` : ''}
       </div>
       ${bodyHtml}
@@ -1247,11 +1247,11 @@ function renderParagraphs() {
     const paraAnnots = state.annotations.filter(a => a.paragraph_id === pid);
     let annotClass = '';
     if (paraAnnots.length > 0) {
-      const hasButter = paraAnnots.some(a => a.author !== 'Claude');
-      const hasClaude = paraAnnots.some(a => a.author === 'Claude');
-      if (hasButter && hasClaude) annotClass = 'has-both';
-      else if (hasClaude) annotClass = 'has-claude';
-      else if (hasButter) annotClass = 'has-butter';
+      const hasYinyin = paraAnnots.some(a => a.author !== '克先生');
+      const hasKieran = paraAnnots.some(a => a.author === '克先生');
+      if (hasYinyin && hasKieran) annotClass = 'has-both';
+      else if (hasKieran) annotClass = 'has-kieran';
+      else if (hasYinyin) annotClass = 'has-yinyin';
     }
 
     // Render text with inline highlights
@@ -1283,8 +1283,8 @@ function renderAnnotationsOverview() {
   // Filter
   if (state.annotFilter === 'highlight') annots = annots.filter(a => a.type === 'highlight');
   else if (state.annotFilter === 'note') annots = annots.filter(a => a.type === 'note');
-  else if (state.annotFilter === 'butter') annots = annots.filter(a => a.author !== 'Claude');
-  else if (state.annotFilter === 'claude') annots = annots.filter(a => a.author === 'Claude');
+  else if (state.annotFilter === 'yinyin') annots = annots.filter(a => a.author !== '克先生');
+  else if (state.annotFilter === 'kieran') annots = annots.filter(a => a.author === '克先生');
 
   // Group by paragraph
   const grouped = {};
@@ -1312,8 +1312,8 @@ function renderAnnotationsOverview() {
       ${filterBtn('All', null)}
       ${filterBtn('Highlights', 'highlight')}
       ${filterBtn('Notes', 'note')}
-      ${filterBtn('Butter', 'butter')}
-      ${filterBtn('Claude', 'claude')}
+      ${filterBtn('音音', 'yinyin')}
+      ${filterBtn('克先生', 'kieran')}
     </div>
     ${sortedPids.length === 0
       ? `<div class="empty-state"><div class="empty-glyph">§</div><div class="empty-text">no annotations</div></div>`
@@ -1334,38 +1334,38 @@ function renderAnnotationsOverview() {
         }
         let inner = '';
         for (const hl of highlights) {
-          const isClaude = hl.author === 'Claude';
-          const colorVar = isClaude ? 'accent' : 'jade';
-          const authorName = isClaude ? 'Claude' : 'Butter';
+          const isKieran = hl.author === '克先生';
+          const colorVar = isKieran ? 'accent' : 'jade';
+          const authorName = isKieran ? '克先生' : '音音';
           const children = linkedMap[hl.id] || [];
           const directChildren = children.filter(n => !children.some(p => p.id === n.reply_to));
           let notesHtml = '';
           for (const n of directChildren) {
-            const nClaude = n.author === 'Claude';
+            const nKieran = n.author === '克先生';
             const cleaned = cleanNoteText(n.text || '', hl.text || '');
             const replies = items.filter(r => r.reply_to === n.id);
             notesHtml += '<div style="border-top:0.5px solid var(--border-soft);padding:4px 0">';
-            notesHtml += '<div class="overview-annot-author" style="color:var(--' + (nClaude?'accent':'jade') + ')">' + (nClaude?'Claude':'Butter') + '</div>';
+            notesHtml += '<div class="overview-annot-author" style="color:var(--' + (nKieran?'accent':'jade') + ')">' + (nKieran?'克先生':'音音') + '</div>';
             notesHtml += '<div class="overview-annot-text">' + esc(cleaned) + '</div></div>';
             for (const r of replies) {
-              const rClaude = r.author === 'Claude';
+              const rKieran = r.author === '克先生';
               notesHtml += '<div style="border-top:0.5px solid var(--border-soft);padding:4px 0 4px 12px">';
-              notesHtml += '<div class="overview-annot-author" style="color:var(--' + (rClaude?'accent':'jade') + ')"><span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' + (rClaude?'Claude':'Butter') + '</div>';
+              notesHtml += '<div class="overview-annot-author" style="color:var(--' + (rKieran?'accent':'jade') + ')"><span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' + (rKieran?'克先生':'音音') + '</div>';
               notesHtml += '<div class="overview-annot-text">' + esc(r.text || '') + '</div></div>';
             }
           }
-          inner += '<div class="overview-annot ' + (isClaude?'claude':'user') + '" style="display:flex;align-items:stretch;gap:8px;border-left:none;padding-left:0">';
+          inner += '<div class="overview-annot ' + (isKieran?'kieran':'user') + '" style="display:flex;align-items:stretch;gap:8px;border-left:none;padding-left:0">';
           inner += '<div style="width:3px;border-radius:2px;background:var(--' + colorVar + ');opacity:0.6;flex-shrink:0"></div>';
           inner += '<div style="flex:1;min-width:0">';
           inner += '<div class="overview-annot-author" style="color:var(--' + colorVar + ')">' + authorName + '</div>';
-          inner += '<div class="overview-annot-text"><span class="annot-row-highlight ' + (isClaude?'hl-claude':'') + '">' + esc(hl.text || '') + '</span></div>';
+          inner += '<div class="overview-annot-text"><span class="annot-row-highlight ' + (isKieran?'hl-kieran':'') + '">' + esc(hl.text || '') + '</span></div>';
           inner += notesHtml + '</div></div>';
         }
         for (const n of standaloneNotes) {
-          const nClaude = n.author === 'Claude';
-          const nColor = nClaude ? 'accent' : 'jade';
-          const nAuthor = nClaude ? 'Claude' : 'Butter';
-          inner += '<div class="overview-annot ' + (nClaude?'claude':'user') + '">';
+          const nKieran = n.author === '克先生';
+          const nColor = nKieran ? 'accent' : 'jade';
+          const nAuthor = nKieran ? '克先生' : '音音';
+          inner += '<div class="overview-annot ' + (nKieran?'kieran':'user') + '">';
           inner += '<div class="overview-annot-author" style="color:var(--' + nColor + ')">' + nAuthor + '</div>';
           inner += '<div class="overview-annot-text">' + esc(n.text || '') + '</div></div>';
         }
@@ -1592,7 +1592,7 @@ function initFontsize() {
   if (!slider) return;
 
   // Load saved font size
-  const saved = localStorage.getItem('marginalia-fontsize');
+  const saved = localStorage.getItem('tasogare-fontsize');
   if (saved) {
     slider.value = saved;
     document.documentElement.style.setProperty('--reader-font-size', saved + 'px');
@@ -1603,7 +1603,7 @@ function initFontsize() {
     const val = e.target.value;
     document.documentElement.style.setProperty('--reader-font-size', val + 'px');
     if (valueEl) valueEl.textContent = val + 'px';
-    localStorage.setItem('marginalia-fontsize', val);
+    localStorage.setItem('tasogare-fontsize', val);
   });
 
   // Close font panel when clicking outside
@@ -1625,13 +1625,23 @@ document.addEventListener('click', (e) => {
   if (del) confirmDeleteAnnot(del.dataset.id, del.dataset.type);
 });
 
+// 阅读时长打点：阅读视图打开且页面可见时，每 60s 上报一次
+setInterval(() => {
+  if (state.view === 'reading' && state.currentBook && document.visibilityState === 'visible') {
+    api(`/books/${state.currentBook.id}/reading-ping`, {
+      method: 'POST',
+      body: JSON.stringify({ seconds: 60 }),
+    }).catch(() => {});
+  }
+}, 60000);
+
 function init() {
   if (state.nightMode) {
     document.body.classList.add('night-mode');
     document.querySelector('.night-toggle').textContent = '☾';
   }
   // Load saved font size on init
-  const savedFs = localStorage.getItem('marginalia-fontsize');
+  const savedFs = localStorage.getItem('tasogare-fontsize');
   if (savedFs) {
     document.documentElement.style.setProperty('--reader-font-size', savedFs + 'px');
   }
