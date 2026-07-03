@@ -146,7 +146,7 @@ body {
   color: var(--accent);
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 300;
   letter-spacing: 0.05em;
   border: none;
@@ -167,7 +167,7 @@ body {
   border-radius: var(--radius);
   background: none;
   color: var(--ink3);
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0.08em;
 }
 .nav-btn.btn-upload:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
@@ -331,33 +331,34 @@ body {
 
 .detail-meta {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 300;
   letter-spacing: 1px;
   color: var(--ink3);
 }
 
+/* detail 页第一动作，字号/高度都要压过下面的卡片（音音 07-04：主次别反） */
 .continue-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 14px 18px;
+  padding: 20px 22px;
   background: var(--ink1);
   color: var(--bg);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 15px;
   font-weight: 500;
-  letter-spacing: 1.5px;
+  letter-spacing: 2px;
   text-transform: uppercase;
   margin-bottom: 16px;
   transition: opacity 0.25s var(--ease);
 }
 .continue-btn:hover { opacity: 0.85; }
-.continue-btn svg { width: 11px; height: 11px; }
+.continue-btn svg { width: 17px; height: 17px; }
 
 /* ===== PROGRESS CARD ===== */
 .progress-card {
@@ -377,14 +378,14 @@ body {
 
 .progress-title {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 500;
   color: var(--ink1);
 }
 
 .progress-pages {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 300;
   letter-spacing: 1.5px;
   color: var(--ink3);
@@ -405,23 +406,23 @@ body {
 
 .progress-label {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--ink1);
 }
 
 .progress-pct {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 300;
 }
 .progress-pct.amber { color: var(--accent); }
 .progress-pct.jade { color: var(--jade); }
 
 .bar-gauge {
-  height: 5px;
+  height: 7px;
   background: var(--surface3);
-  border-radius: 2.5px;
+  border-radius: 3.5px;
   overflow: hidden;
 }
 .bar-gauge-fill {
@@ -450,14 +451,14 @@ body {
 
 .annot-card-title {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 500;
   color: var(--ink1);
 }
 
 .annot-card-count {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 300;
   color: var(--ink3);
 }
@@ -482,7 +483,7 @@ body {
 
 .annot-group-pid {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--ink3);
   letter-spacing: 0.5px;
@@ -495,7 +496,7 @@ body {
 }
 
 .annot-group-n {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 300;
   color: var(--ink3);
 }
@@ -569,7 +570,7 @@ body {
   border: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 300;
   letter-spacing: 1.5px;
   text-transform: uppercase;

@@ -1040,7 +1040,7 @@ function renderDetail() {
   if (!b) return '';
 
   const currentPage = b.progress?.page || 1;
-  const totalPages = b.total_pages || 0;
+  const totalPages = b.total_pages || b.page_count || 0;   // 书列表 API 的字段是 page_count
   const myPct = totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0;
 
   const isFidBook = b.mode === 'fidelity';
@@ -1062,7 +1062,7 @@ function renderDetail() {
 
   const metaParts = [];
   if (totalPages > 0) metaParts.push(`${totalPages} pages`);
-  if (paraCount > 0) metaParts.push(`${paraCount} ¶`);
+  if (!isFidBook && b.paragraph_count > 0) metaParts.push(`${b.paragraph_count} ¶`);   // fidelity 无段落语义
   if (state.detailAnnotations.length > 0) metaParts.push(`${state.detailAnnotations.length} notes`);
 
   return `
@@ -1115,7 +1115,7 @@ function renderDetail() {
       </div>
       ${sortedGroups.length === 0 ? `
         <div style="padding:0 16px 16px;">
-          <span style="font-family:var(--font-mono);font-size:9px;font-weight:300;color:var(--ink3)">no annotations yet</span>
+          <span style="font-family:var(--font-mono);font-size:11px;font-weight:300;color:var(--ink3)">no annotations yet</span>
         </div>
       ` : sortedGroups.map(pid => {
         const items = grouped[pid];
