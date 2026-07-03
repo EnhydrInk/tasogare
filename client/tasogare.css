@@ -269,6 +269,17 @@ body {
   transition: width 0.35s var(--ease);
 }
 
+/* file input 的隐藏姿势：iOS 对 display:none 的 <input type=file> 有历史怪癖——
+   label 点击不弹 picker（渲染树里不存在就不唤起）。1px + opacity:0 保持"活着但看不见"。 */
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
 /* ===== UPLOAD ZONE ===== */
 .upload-zone {
   border: 1px dashed var(--border-strong);

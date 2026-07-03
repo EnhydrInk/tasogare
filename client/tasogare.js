@@ -878,7 +878,7 @@ function renderShelf() {
       <div class="page-subtitle"><span class="dash">—— </span>the reading room · ${state.books.length} books</div>
       <div class="header-rule"></div>
     </div>
-    <input type="file" id="fileInput" accept=".pdf,.txt,.epub" style="display:none">
+    <input type="file" id="fileInput" accept=".pdf,.txt,.epub" class="file-input-hidden">
     <label class="nav-btn btn-upload" for="fileInput">${SVG.plus} add a book</label>
     <div class="upload-zone" id="uploadZone">
       <div class="upload-glyph">§</div>
