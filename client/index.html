@@ -20,17 +20,20 @@
 </div>
 <button class="night-toggle" onclick="toggleNight()" title="Toggle night mode" aria-label="Toggle night mode"></button>
 
-<!-- Floating selection toolbar (lives outside #app so it doesn't get re-rendered) -->
+<!-- Selection action bar：固定从屏幕底部滑出，跟 iOS 原生 edit 菜单（跟着选区跳）空间解耦
+     (lives outside #app so it doesn't get re-rendered) -->
 <div class="sel-toolbar" id="selToolbar">
   <button class="sel-toolbar-btn hl-btn" id="selHighlightBtn" title="Highlight">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 13h12M4.5 10L8 3l3.5 7"/><path d="M5.5 8h5"/></svg>
+    <span class="sel-toolbar-btn-label">highlight</span>
   </button>
-  <div class="sel-toolbar-sep"></div>
   <button class="sel-toolbar-btn" id="selVocabBtn" title="Vocab">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 5h6M5 8h4M5 11h5"/></svg>
+    <span class="sel-toolbar-btn-label">vocab</span>
   </button>
   <button class="sel-toolbar-btn" id="selCopyBtn" title="Copy">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V3h8"/></svg>
+    <span class="sel-toolbar-btn-label">copy</span>
   </button>
 </div>
 

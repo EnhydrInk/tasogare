@@ -753,26 +753,8 @@ function handleSelectionChange() {
     return;
   }
 
-  // Position toolbar BELOW selection——上方是 iOS 原生 copy 菜单的地盘，别撞（音音 07-03）。
-  // 16px 间距同时避开 iOS 选区下缘的拖拽把手。
-  const range = sel.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
+  // 底部固定条：不算坐标，纯开关。iOS 原生 edit 菜单跟着选区跳，我们在地面层，永不相撞（音音 07-03 v2）。
   const toolbar = document.getElementById('selToolbar');
-
-  const toolbarWidth = 220;
-  const toolbarHeight = 40;
-
-  let left = rect.left + (rect.width / 2) - (toolbarWidth / 2) + window.scrollX;
-  let top = rect.bottom + 16 + window.scrollY;
-
-  // Clamp to viewport；快贴到屏幕底时翻回选区上方
-  left = Math.max(8, Math.min(left, window.innerWidth - toolbarWidth - 8));
-  if (rect.bottom + 16 + toolbarHeight > window.innerHeight - 8) {
-    top = rect.top - toolbarHeight - 8 + window.scrollY;
-  }
-
-  toolbar.style.left = left + 'px';
-  toolbar.style.top = top + 'px';
   toolbar.classList.add('visible');
 }
 

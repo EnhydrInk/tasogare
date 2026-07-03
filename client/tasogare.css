@@ -709,20 +709,25 @@ mark.hl-both:hover {
   background: linear-gradient(180deg, var(--hl-yinyin-strong) 50%, var(--hl-kieran-strong) 50%);
 }
 
-/* ===== FLOATING SELECTION TOOLBAR ===== */
+/* ===== SELECTION ACTION BAR =====
+   固定屏幕底部滑出（音音 07-03 v2）：跟着选区飘的浮条跟 iOS 原生 edit 菜单
+   抢地皮——上方撞（原生默认位）、下方也撞（选区靠上时原生翻下来）。
+   底部固定条跟"跟着选区跳"的原生菜单彻底解耦，且离拇指最近。 */
 .sel-toolbar {
-  position: absolute;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 80;
   background: var(--surface);
-  border: 0.5px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-  padding: 4px;
+  border-top: 0.5px solid var(--border-strong);
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.10);
+  padding: 6px 12px calc(6px + env(safe-area-inset-bottom, 0px));
   display: flex;
-  gap: 2px;
+  gap: 4px;
   opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+  transform: translateY(100%);
+  transition: opacity 0.2s var(--ease), transform 0.25s var(--ease);
   pointer-events: none;
 }
 .sel-toolbar.visible {
@@ -733,11 +738,12 @@ mark.hl-both:hover {
 
 .sel-toolbar-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  width: 32px;
-  height: 32px;
+  gap: 3px;
+  flex: 1;
+  min-height: 52px;
   border: none;
   background: none;
   border-radius: 2px;
@@ -1650,6 +1656,13 @@ mark.hl-both:hover {
 }
 
 /* ===== SELECTION TOOLBAR SEPARATOR ===== */
+.sel-toolbar-btn-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 300;
+  letter-spacing: 0.5px;
+}
+
 .sel-toolbar-sep {
   width: 1px;
   height: 20px;
