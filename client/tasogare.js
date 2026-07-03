@@ -753,7 +753,8 @@ function handleSelectionChange() {
     return;
   }
 
-  // Position toolbar above selection
+  // Position toolbar BELOW selection——上方是 iOS 原生 copy 菜单的地盘，别撞（音音 07-03）。
+  // 16px 间距同时避开 iOS 选区下缘的拖拽把手。
   const range = sel.getRangeAt(0);
   const rect = range.getBoundingClientRect();
   const toolbar = document.getElementById('selToolbar');
@@ -762,12 +763,12 @@ function handleSelectionChange() {
   const toolbarHeight = 40;
 
   let left = rect.left + (rect.width / 2) - (toolbarWidth / 2) + window.scrollX;
-  let top = rect.top - toolbarHeight - 8 + window.scrollY;
+  let top = rect.bottom + 16 + window.scrollY;
 
-  // Clamp to viewport
+  // Clamp to viewport；快贴到屏幕底时翻回选区上方
   left = Math.max(8, Math.min(left, window.innerWidth - toolbarWidth - 8));
-  if (top < window.scrollY + 8) {
-    top = rect.bottom + 8 + window.scrollY;
+  if (rect.bottom + 16 + toolbarHeight > window.innerHeight - 8) {
+    top = rect.top - toolbarHeight - 8 + window.scrollY;
   }
 
   toolbar.style.left = left + 'px';
@@ -1147,7 +1148,7 @@ function renderReading() {
       <button class="nav-back" onclick="backFromReader()">${SVG.chevronLeft} Back</button>
     </div>
     <div class="reader-topbar-title">${esc(b.title)}</div>
-    <div class="reader-topbar-right"><button class="nav-btn subtle" onclick="openSearch()" title="Search" style="font-size:11px">⚲</button></div>
+    <div class="reader-topbar-right"><button class="nav-btn subtle" onclick="openSearch()" title="Search" style="font-size:14px">⚲</button></div>
   </div>
   <div class="reader-progress"><div class="reader-progress-fill" style="width:${pct}%"></div></div>
   <div class="folio reader-folio fade-in">

@@ -116,7 +116,7 @@ body {
   text-decoration: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 300;
   letter-spacing: 0.05em;
   border: none;
@@ -580,8 +580,9 @@ body {
   flex: 1;
   text-align: center;
   font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 500;
+  font-style: italic;
+  font-size: calc(var(--reader-font-size) + 2px);
+  font-weight: 600;
   color: var(--ink1);
   white-space: nowrap;
   overflow: hidden;
@@ -1001,7 +1002,7 @@ mark.hl-both:hover {
   background: none;
   cursor: pointer;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 300;
   letter-spacing: 0.5px;
   color: var(--ink2);
@@ -1305,7 +1306,7 @@ mark.hl-both:hover {
   justify-content: center;
   padding: 4px 20px 0;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 300;
   letter-spacing: 0.5px;
   color: var(--ink4);
@@ -1510,10 +1511,10 @@ mark.hl-both:hover {
 .bottombar-btn:hover,
 .bottombar-btn:active { color: var(--accent); }
 .bottombar-btn.active { color: var(--accent); }
-.bottombar-btn svg { width: 18px; height: 18px; }
+.bottombar-btn svg { width: 20px; height: 20px; }
 .bottombar-btn-label {
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 300;
   letter-spacing: 0.5px;
 }
