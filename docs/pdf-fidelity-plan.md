@@ -62,6 +62,10 @@ fidelity 书的 annotation 锚：
 1. iOS canvas 内存上限——靠翻页模式 + 小 buffer 规避，P4 用 Strang 真机压测验证（单页 vs 连续滚动业界无实测数据，只能自己测）。
 2. PDF TextLayer 的文本抽取顺序/空白不稳定（数学排版尤甚）——Hypothesis 的模糊锚定就是为此设计的，quote 锚容错；但选区体验在公式密集区可能不完美，接受。
 
+### 反面教材（Koodo Reader，引以为戒）
+
+Koodo 的 PDF/EPUB 共用一个 Note schema，但**字段语义分裂**：`cfi` 字段在 EPUB 存真 CFI、在 PDF 塞 JSON 页码；`range` 字段只有 PDF 用（塞 rect 数组）——同一字段两种含义，靠 `format === "PDF"` 分支解释。我们用显式 `mode` 字段分流两种锚型，绝不复用字段装不同语义。
+
 ### 情报来源（调研 agent 存档）
 
 - Hypothesis anchoring：`types.ts` / `match-quote.ts` / `pdf.ts` / `placeholder.ts`（MIT 系可抄）
