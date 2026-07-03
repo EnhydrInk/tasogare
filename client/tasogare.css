@@ -59,11 +59,15 @@
 /* ===== RESET ===== */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* 横向锁死：iOS WebView 里页面不准左右晃（音音 07-03）。
-   必须用 clip 不能用 hidden——body 上的 overflow-x:hidden 会创建裁剪容器，
-   把 .reader-topbar 的 sticky 参照系从视口偷换成 body（顶栏跟内容一起滚走，
-   音音 07-03 实测踩中）；clip 纯裁剪、不动定位语义。 */
+/* 横向锁死：iOS WebView 里页面不准左右晃（音音 07-03）。三次踩坑的最终形态：
+   1. overflow-x:hidden —— 锁住了，但 body 上的 hidden 创建裁剪容器，sticky 顶栏
+      参照系被偷换成 body，滚动时顶栏跟内容跑（音音实测）
+   2. overflow-x:clip —— sticky 好了，但 WebKit 视口语义里 clip 挡不住 iOS 横向
+      橡皮筋手势，又能左右拉了（音音实测 ×2）
+   3. clip（裁视觉溢出）+ touch-action: pan-y（手势层禁横向 pan）—— 各管各的。
+   长按选字/拖选区把手是系统手势，不走 touch-action，划线不受影响。 */
 html, body { overflow-x: clip; }
+body { touch-action: pan-y; }
 
 body {
   background: var(--bg);
