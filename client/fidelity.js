@@ -22,6 +22,12 @@ let _fidScale = 1;                 // 当前渲染 scale（screen px / pdf point
 let _fidRotate = 0;                // 当前 PDF 页 rotate（≠0 时 overlay 降级）
 const _fidPageCache = new Map();   // n -> {text, words}
 
+// 阅读区局部缩放（音音 07-04：手机上教科书字太小）。1 = fit-width。
+// 重渲染是矢量放大（字锐利），不是位图拉伸。
+const FID_ZOOM_MIN = 1, FID_ZOOM_MAX = 3, FID_ZOOM_STEP = 0.25;
+let _fidZoom = Math.min(FID_ZOOM_MAX, Math.max(FID_ZOOM_MIN,
+  parseFloat(localStorage.getItem('tasogare-fid-zoom')) || 1));
+
 function isFid() {
   return state.currentBook?.mode === 'fidelity';
 }
@@ -76,6 +82,11 @@ async function fidPageData(n) {
 async function fidelityMount() {
   const stage = document.getElementById('fidStage');
   if (!stage) return;
+  if (!stage.dataset.pinchBound) {   // render() 重建 DOM 后是新元素，重新绑
+    stage.dataset.pinchBound = '1';
+    fidInitPinch(stage);
+    fidZoomLabel();
+  }
   const seq = ++_fidRenderSeq;
   const loadingEl = document.getElementById('fidLoading');
   try {
@@ -90,9 +101,9 @@ async function fidelityMount() {
     const textDiv = document.getElementById('fidText');
     const overlay = document.getElementById('fidOverlay');
 
-    // fit-width：stage 是 folio 内容宽。高清走 dpr 放大的 viewport 渲染、CSS 缩回显示尺寸
+    // fit-width × 用户缩放。stage 是滚动容器，clientWidth 不随内容变，fit 基准稳定
     const baseViewport = page.getViewport({ scale: 1 });
-    const scale = stage.clientWidth / baseViewport.width;
+    const scale = (stage.clientWidth / baseViewport.width) * _fidZoom;
     _fidScale = scale;
     const viewport = page.getViewport({ scale });
     const dpr = window.devicePixelRatio || 1;
@@ -344,6 +355,86 @@ async function addFidNote(pdfPage, quote, text, highlightId) {
   });
   state.annotations.push(annot);
   renderAnnotPanel();
+}
+
+// ===== 缩放 =====
+
+function fidZoomLabel() {
+  const el = document.getElementById('fidZoomLabel');
+  if (el) el.textContent = Math.round(_fidZoom * 100) + '%';
+}
+
+// anchorX：缩放前后尽量停在原屏幕位置的横向锚点（视口坐标）。
+// 横向在 stage 内滚、补偿到锚点；纵向是 body 在滚，内容变高不跳位，她自己顺手一划。
+function fidSetZoom(z, anchorX) {
+  z = Math.min(FID_ZOOM_MAX, Math.max(FID_ZOOM_MIN, Math.round(z * 20) / 20));
+  if (z === _fidZoom) return;
+  const stage = document.getElementById('fidStage');
+  const ratio = z / _fidZoom;
+  let scrollLeft = null;
+  if (stage) {
+    const box = stage.getBoundingClientRect();
+    const ax = anchorX !== undefined ? anchorX - box.left : box.width / 2;
+    scrollLeft = (stage.scrollLeft + ax) * ratio - ax;
+  }
+  _fidZoom = z;
+  localStorage.setItem('tasogare-fid-zoom', String(z));
+  fidZoomLabel();
+  fidelityMount().then(() => {
+    const st = document.getElementById('fidStage');
+    if (st && scrollLeft !== null) st.scrollLeft = Math.max(0, scrollLeft);
+  });
+}
+
+function fidZoomBy(delta) {
+  fidSetZoom(_fidZoom + delta);
+}
+
+function fidZoomReset() {
+  fidSetZoom(1);
+}
+
+// 捏合缩放：两指进（选字是单指长按，互不干扰）。捏合中用 CSS transform 即时预览
+// （廉价），松手后按最终倍数矢量重渲染。腱鞘炎备忘：浮钮和手势两条路并存。
+let _pinch = null;
+function fidInitPinch(stage) {
+  stage.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    const [a, b] = e.touches;
+    _pinch = {
+      d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      zoom0: _fidZoom,
+      midX: (a.clientX + b.clientX) / 2,
+      midY: (a.clientY + b.clientY) / 2,
+      f: 1,
+    };
+  }, { passive: true });
+  stage.addEventListener('touchmove', (e) => {
+    if (!_pinch || e.touches.length !== 2) return;
+    e.preventDefault();   // 拦掉系统手势/滚动，缩放归我们
+    const [a, b] = e.touches;
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    let f = d / _pinch.d0;
+    // 预览也夹在允许范围内，别让画面弹回
+    f = Math.min(FID_ZOOM_MAX / _pinch.zoom0, Math.max(FID_ZOOM_MIN / _pinch.zoom0, f));
+    _pinch.f = f;
+    const wrap = document.getElementById('fidWrap');
+    if (wrap) {
+      const wb = wrap.getBoundingClientRect();
+      wrap.style.transformOrigin = `${_pinch.midX - wb.left}px ${_pinch.midY - wb.top}px`;
+      wrap.style.transform = `scale(${f})`;
+    }
+  }, { passive: false });
+  const end = () => {
+    if (!_pinch) return;
+    const { zoom0, f, midX } = _pinch;
+    _pinch = null;
+    const wrap = document.getElementById('fidWrap');
+    if (wrap) { wrap.style.transform = ''; wrap.style.transformOrigin = ''; }
+    if (Math.abs(f - 1) > 0.02) fidSetZoom(zoom0 * f, midX);
+  };
+  stage.addEventListener('touchend', end, { passive: true });
+  stage.addEventListener('touchcancel', end, { passive: true });
 }
 
 // resize（转屏/分屏）→ 重排当前页；debounce

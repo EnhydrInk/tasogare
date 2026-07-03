@@ -1330,6 +1330,11 @@ function renderReadingFidelity(b, pct) {
       </div>
       <div class="fid-loading visible" id="fidLoading">rendering page...</div>
     </div>
+    <div class="fid-zoom">
+      <button class="fid-zoom-btn" onclick="fidZoomBy(0.25)" aria-label="Zoom in">＋</button>
+      <button class="fid-zoom-label" id="fidZoomLabel" onclick="fidZoomReset()" title="Reset zoom">100%</button>
+      <button class="fid-zoom-btn" onclick="fidZoomBy(-0.25)" aria-label="Zoom out">－</button>
+    </div>
     <div class="page-nav">
       <button class="page-nav-btn" onclick="goPage(${state.currentPage - 1})" ${state.currentPage <= 1 ? 'disabled' : ''}>
         ${SVG.chevronLeft} Prev

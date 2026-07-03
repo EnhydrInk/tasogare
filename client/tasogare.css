@@ -1775,17 +1775,63 @@ mark.hl-both:hover {
 /* 三层：canvas 位图(z0) → 高亮 overlay(z1，不吃指针) → TextLayer(z2，透明可选中)。
    overlay 点击走 JS hit-test，不靠 DOM 事件。 */
 .fid-folio { max-width: none; }
+/* 放大后横向在 stage 里滚（body 仍锁横滑，同宽表格模式）。
+   不用 flex 居中——flex center + overflow 会裁掉左缘不可达（经典坑），
+   block + wrap margin auto：zoom=1 正好占满、放大后从左滚起。
+   touch-action pan-x pan-y：允许单指拖动，两指捏合归 JS（fidInitPinch）。 */
 .pdf-stage {
   position: relative;
   width: 100%;
   min-height: 200px;
-  display: flex;
-  justify-content: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 .pdf-page-wrap {
   position: relative;
+  margin: 0 auto;
   box-shadow: 0 1px 6px rgba(43,36,26,0.12), 0 6px 24px rgba(43,36,26,0.08);
   background: #fff;
+}
+
+/* 缩放浮钮：右缘竖排，避开底栏和划线操作条；跟手势两条路并存（腱鞘炎友好） */
+.fid-zoom {
+  position: fixed;
+  right: 10px;
+  bottom: calc(170px + env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(43,36,26,0.14);
+  overflow: hidden;
+  opacity: 0.92;
+}
+.fid-zoom-btn {
+  width: 44px;
+  height: 40px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--ink2);
+  font-family: var(--font-mono);
+}
+.fid-zoom-btn:active { background: var(--surface2); }
+.fid-zoom-label {
+  width: 44px;
+  padding: 6px 0;
+  border: none;
+  border-top: 0.5px solid var(--border-soft);
+  border-bottom: 0.5px solid var(--border-soft);
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink3);
 }
 .pdf-page-wrap canvas {
   display: block;
