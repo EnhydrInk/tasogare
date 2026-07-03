@@ -98,7 +98,7 @@ body {
 
 /* ===== HEADER ===== */
 .page-header {
-  padding: calc(56px + env(safe-area-inset-top, 0px)) 0 20px;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 0 20px;
 }
 
 .header-nav {
@@ -148,16 +148,26 @@ body {
   padding: 4px 0;
 }
 .nav-btn:hover { opacity: 0.7; }
-/* 书架 Upload：真按钮（音音 07-03——别再让它是一行小字） */
+/* 书架 add a book：标题块下的全宽虚线按钮——drop zone 的手机形态（音音 07-03 定位置/配色）。
+   墨棕虚线不抢书的风头；桌面 >600px 藏按钮、显拖拽大框，同一个位置两种范式。 */
 .nav-btn.btn-upload {
-  padding: 10px 16px;
-  border: 1px solid var(--accent);
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 13px;
+  margin: 16px 0 12px;
+  border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
-  background: var(--accent-soft);
+  background: none;
+  color: var(--ink3);
   font-size: 11px;
   letter-spacing: 0.08em;
 }
+.nav-btn.btn-upload:hover { opacity: 1; color: var(--accent); border-color: var(--accent); }
 .nav-btn.btn-upload svg { width: 13px; height: 13px; }
+@media (min-width: 601px) {
+  .nav-btn.btn-upload { display: none; }
+}
 .nav-btn svg { width: 11px; height: 11px; }
 .nav-btn.subtle { color: var(--ink3); }
 

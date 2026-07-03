@@ -891,17 +891,12 @@ function renderShelf() {
   return `
   <div class="folio fade-in">
     <div class="page-header">
-      <div class="header-nav">
-        <div></div>
-        <div class="nav-actions">
-          <label class="nav-btn btn-upload" for="fileInput">${SVG.plus} Upload</label>
-        </div>
-      </div>
       <div class="page-title">Tasogare</div>
       <div class="page-subtitle"><span class="dash">—— </span>the reading room · ${state.books.length} books</div>
       <div class="header-rule"></div>
     </div>
     <input type="file" id="fileInput" accept=".pdf,.txt,.epub" style="display:none">
+    <label class="nav-btn btn-upload" for="fileInput">${SVG.plus} add a book</label>
     <div class="upload-zone" id="uploadZone">
       <div class="upload-glyph">§</div>
       <div class="upload-label">drop a pdf / epub / txt here</div>
