@@ -7,7 +7,7 @@ import multer from "multer";
 import { randomUUID, createHash, timingSafeEqual } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync } from "fs";
 import { execFileSync } from "child_process";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 import iconv from "iconv-lite";
@@ -22,13 +22,16 @@ const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/opt/tasogare/data";
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "/opt/tasogare/uploads";
 const EXTRACT_SCRIPT = join(__dirname, "extract_pdf.py");
+const EXTRACT_FIDELITY = join(__dirname, "extract_pdf_fidelity.py");
 const EXTRACT_EPUB = join(__dirname, "extract_epub.py");
+const PDF_DIR = resolve(DATA_DIR, "pdfs");
+const WORDS_DIR = resolve(DATA_DIR, "words");
 // InKieran 事件推送（不设 = 关闭；fire-and-forget，永不阻塞主流程）
 const INKIERAN_PUSH_URL = process.env.INKIERAN_PUSH_URL || "";
 const INKIERAN_PUSH_TOKEN = process.env.INKIERAN_PUSH_TOKEN || "";
 const TARGET_CHARS = 800;
 
-[DATA_DIR, UPLOAD_DIR].forEach(d => { if (!existsSync(d)) mkdirSync(d, { recursive: true }); });
+[DATA_DIR, UPLOAD_DIR, PDF_DIR, WORDS_DIR].forEach(d => { if (!existsSync(d)) mkdirSync(d, { recursive: true }); });
 
 // --- File locking ---
 const fileLocks = new Map();
@@ -62,6 +65,90 @@ function jstDay(iso) {
 
 // --- Data helpers ---
 function bookPath(id) { return `${DATA_DIR}/${id}.json`; }
+function pdfPath(id) { return resolve(DATA_DIR, "pdfs", `${id}.pdf`); }
+function wordsPath(id) { return resolve(DATA_DIR, "words", `${id}.json`); }
+
+const wordsCache = new Map();
+
+function bookMode(book) {
+  return book?.mode === "fidelity" ? "fidelity" : "reflow";
+}
+
+function isFidelityBook(book) {
+  return bookMode(book) === "fidelity";
+}
+
+function annotationMode(annotation) {
+  return annotation?.anchor_mode === "fidelity" ? "fidelity" : "reflow";
+}
+
+function annotationAnchorKey(annotation) {
+  return annotationMode(annotation) === "fidelity"
+    ? `p:${annotation.pdf_page}`
+    : `para:${annotation.paragraph_id}`;
+}
+
+function normalizeText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function textIncludesQuote(text, quote) {
+  const normalizedQuote = normalizeText(quote);
+  if (!normalizedQuote) return false;
+  return normalizeText(text).includes(normalizedQuote);
+}
+
+function getFidelityPageText(book, pageNum) {
+  if (!isFidelityBook(book)) return "";
+  if (Array.isArray(book.page_texts)) return String(book.page_texts[pageNum - 1] || "");
+  const page = Array.isArray(book.pages) ? book.pages[pageNum - 1] : null;
+  if (page && typeof page === "object") return String(page.text || "");
+  return "";
+}
+
+function getFidelityPageCount(book) {
+  if (Array.isArray(book.page_texts)) return book.page_texts.length;
+  if (Number.isInteger(book.page_count)) return book.page_count;
+  return Array.isArray(book.pages) ? book.pages.length : 0;
+}
+
+function getTotalPages(book) {
+  if (isFidelityBook(book)) return getFidelityPageCount(book);
+  ensurePages(book);
+  return book.pages.length;
+}
+
+function loadWords(book) {
+  if (!isFidelityBook(book)) return null;
+  if (wordsCache.has(book.id)) return wordsCache.get(book.id);
+  const p = wordsPath(book.id);
+  if (!existsSync(p)) return null;
+  try {
+    const payload = JSON.parse(readFileSync(p, "utf-8"));
+    wordsCache.set(book.id, payload);
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function getFidelityWords(book, pageNum) {
+  const payload = loadWords(book);
+  if (!payload || !Array.isArray(payload.pages)) return [];
+  const indexed = payload.pages[pageNum - 1];
+  if (indexed?.n === pageNum) return indexed.words || [];
+  return payload.pages.find(p => p.n === pageNum)?.words || [];
+}
+
+function pageSnippet(text, quote, radius = 120) {
+  const source = String(text || "");
+  const rawQuote = String(quote || "");
+  let idx = rawQuote ? source.indexOf(rawQuote) : -1;
+  if (idx < 0) idx = 0;
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(source.length, idx + rawQuote.length + radius);
+  return (start > 0 ? "..." : "") + source.slice(start, end) + (end < source.length ? "..." : "");
+}
 
 function loadBook(id) {
   const p = bookPath(id);
@@ -100,6 +187,14 @@ function computePages(paragraphs) {
 }
 
 function ensurePages(book) {
+  if (isFidelityBook(book)) {
+    const total = getFidelityPageCount(book);
+    if (!Array.isArray(book.pages) || book.pages.length !== total) {
+      book.pages = Array.from({ length: total }, (_, i) => i + 1);
+      saveBook(book);
+    }
+    return book;
+  }
   if (!book.pages || book.pages.length === 0) {
     book.pages = computePages(book.paragraphs);
     saveBook(book);
@@ -108,6 +203,11 @@ function ensurePages(book) {
 }
 
 function getPageForParagraph(book, paraId) {
+  if (isFidelityBook(book)) {
+    const page = parseInt(paraId, 10);
+    const total = getTotalPages(book);
+    return page >= 1 && page <= total ? page : 1;
+  }
   ensurePages(book);
   for (let i = 0; i < book.pages.length; i++) {
     if (book.pages[i].includes(paraId)) return i + 1;
@@ -123,16 +223,20 @@ function listBooks() {
       try {
         const b = JSON.parse(readFileSync(`${DATA_DIR}/${f}`, "utf-8"));
         if (!b.id || !b.title) return null;
-        if (!b.pages || b.pages.length === 0) {
+        if (isFidelityBook(b)) {
+          ensurePages(b);
+        } else if (!b.pages || b.pages.length === 0) {
           b.pages = computePages(b.paragraphs || []);
           saveBook(b);
         }
+        const pageCount = getTotalPages(b);
         return {
           id: b.id,
           title: b.title,
           filename: b.filename,
+          mode: bookMode(b),
           paragraph_count: b.paragraphs?.length || 0,
-          page_count: b.pages.length,
+          page_count: pageCount,
           annotation_count: b.annotations?.length || 0,
           has_bookmark: !!b.bookmark,
           progress: b.progress || null,
@@ -146,10 +250,14 @@ function listBooks() {
 
 function getPage(book, pageNum) {
   ensurePages(book);
-  if (pageNum < 1 || pageNum > book.pages.length) return null;
+  const total = getTotalPages(book);
+  if (pageNum < 1 || pageNum > total) return null;
+  if (isFidelityBook(book)) {
+    return { page: pageNum, total_pages: total, paragraphs: [], text: getFidelityPageText(book, pageNum) };
+  }
   const paraIds = new Set(book.pages[pageNum - 1]);
-  const paras = book.paragraphs.filter(p => paraIds.has(p.id));
-  return { page: pageNum, total_pages: book.pages.length, paragraphs: paras };
+  const paras = (book.paragraphs || []).filter(p => paraIds.has(p.id));
+  return { page: pageNum, total_pages: total, paragraphs: paras };
 }
 
 function readingStatus() {
@@ -167,7 +275,7 @@ function readingStatus() {
     total += seconds;
     books.push({
       id: book.id, title: book.title, seconds,
-      page: book.progress?.page || 0, total_pages: book.pages.length,
+      page: book.progress?.page || 0, total_pages: getTotalPages(book),
       annotations_today, vocab_today,
       last_active_at: book.last_active_at || book.progress?.updated_at || null,
     });
@@ -196,7 +304,13 @@ function createMcp() {
     if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
     ensurePages(book);
     const p = page || 1;
-    if (p < 1 || p > book.pages.length) return { content: [{ type: "text", text: `页码无效。共${book.pages.length}页。` }] };
+    const totalPages = getTotalPages(book);
+    if (p < 1 || p > totalPages) return { content: [{ type: "text", text: `页码无效。共${totalPages}页。` }] };
+    if (isFidelityBook(book)) {
+      const text = `《${book.title}》第${p}/${totalPages}页\n原版模式，公式排版可能失真。\n\n` +
+        `[p.${p}] ${getFidelityPageText(book, p)}`;
+      return { content: [{ type: "text", text }] };
+    }
     const result = getPage(book, p);
     const text = `《${book.title}》第${p}/${result.total_pages}页\n\n` +
       result.paragraphs.map(para => `[§${para.id}] ${para.text}`).join("\n\n");
@@ -216,11 +330,19 @@ function createMcp() {
 
     const ctx = context_size || 3;
     const text = annots.map(a => {
-      const para = book.paragraphs.find(p => p.id === a.paragraph_id);
-      const paraIdx = book.paragraphs.findIndex(p => p.id === a.paragraph_id);
-      const before = book.paragraphs.slice(Math.max(0, paraIdx - ctx), paraIdx).map(p => `  [§${p.id}] ${p.text}`).join("\n");
-      const after = book.paragraphs.slice(paraIdx + 1, paraIdx + 1 + ctx).map(p => `  [§${p.id}] ${p.text}`).join("\n");
       const replyInfo = a.reply_to ? `\n  ↩ 回复批注 ${a.reply_to}` : "";
+      if (annotationMode(a) === "fidelity") {
+        const pageText = getFidelityPageText(book, a.pdf_page);
+        const body = a.type === "highlight" ? `📌 「${a.quote}」` : `💬 ${a.text}\n  原文: 「${a.quote}」`;
+        return `--- 批注 ${a.id} (${a.author}) ---\n` +
+          `PDF 页 [p.${a.pdf_page}]: ${pageSnippet(pageText, a.quote)}\n` +
+          `${body}${replyInfo}`;
+      }
+      const paragraphs = book.paragraphs || [];
+      const para = paragraphs.find(p => p.id === a.paragraph_id);
+      const paraIdx = paragraphs.findIndex(p => p.id === a.paragraph_id);
+      const before = paraIdx >= 0 ? paragraphs.slice(Math.max(0, paraIdx - ctx), paraIdx).map(p => `  [§${p.id}] ${p.text}`).join("\n") : "";
+      const after = paraIdx >= 0 ? paragraphs.slice(paraIdx + 1, paraIdx + 1 + ctx).map(p => `  [§${p.id}] ${p.text}`).join("\n") : "";
       return `--- 批注 ${a.id} (${a.author}) ---\n` +
         `段落 [§${a.paragraph_id}]: ${para?.text || "(段落已删除)"}\n` +
         `${a.type === "highlight" ? "📌 仅划线" : `💬 ${a.text}`}${replyInfo}\n` +
@@ -231,19 +353,52 @@ function createMcp() {
 
   server.tool("write_comment", "克先生写评论", {
     book_id: z.string().describe("书籍ID"),
-    paragraph_id: z.number().describe("段落编号"),
+    paragraph_id: z.number().optional().describe("段落编号（reflow 书）"),
+    pdf_page: z.number().optional().describe("PDF 页码（fidelity 书）"),
+    quote: z.string().optional().describe("评论锚定的 PDF 原文（fidelity 书）"),
+    prefix: z.string().optional().describe("quote 前文（fidelity 书）"),
+    suffix: z.string().optional().describe("quote 后文（fidelity 书）"),
+    position: z.number().optional().describe("页内文本位置（fidelity 书）"),
     content: z.string().describe("评论内容"),
     reply_to: z.string().optional().describe("回复的批注ID"),
     highlight_id: z.string().optional().describe("关联的高亮批注ID"),
-  }, async ({ book_id, paragraph_id, content, reply_to, highlight_id }) => {
+  }, async ({ book_id, paragraph_id, pdf_page, quote, prefix, suffix, position, content, reply_to, highlight_id }) => {
     return withFileLock(bookPath(book_id), async () => {
       const book = loadBook(book_id);
       if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
-      const para = book.paragraphs.find(p => p.id === paragraph_id);
-      if (!para) return { content: [{ type: "text", text: `段落 §${paragraph_id} 不存在。` }] };
       if (!book.annotations) book.annotations = [];
+      if (isFidelityBook(book)) {
+        const page = parseInt(pdf_page, 10);
+        const total = getTotalPages(book);
+        if (!page || page < 1 || page > total) return { content: [{ type: "text", text: `PDF 页码无效。共${total}页。` }] };
+        if (!quote || !quote.trim()) return { content: [{ type: "text", text: "fidelity 书需要提供 quote。" }] };
+        const annot = {
+          id: randomUUID().slice(0, 8),
+          anchor_mode: "fidelity",
+          pdf_page: page,
+          quote,
+          prefix: prefix || "",
+          suffix: suffix || "",
+          position: Number.isInteger(position) ? position : null,
+          rects: [],
+          type: "note",
+          text: content,
+          author: "克先生",
+          reply_to: reply_to || null,
+          highlight_id: highlight_id || null,
+          created_at: new Date().toISOString(),
+        };
+        book.annotations.push(annot);
+        saveBook(book);
+        pushEvent({ type: "note", author: "克先生", book_id, book_title: book.title, pdf_page: page, text: content.slice(0, 200) });
+        return { content: [{ type: "text", text: `已在 p.${page} 留下评论：${content.slice(0, 50)}...` }] };
+      }
+      if (!paragraph_id) return { content: [{ type: "text", text: "reflow 书需要提供 paragraph_id。" }] };
+      const para = (book.paragraphs || []).find(p => p.id === paragraph_id);
+      if (!para) return { content: [{ type: "text", text: `段落 §${paragraph_id} 不存在。` }] };
       const annot = {
         id: randomUUID().slice(0, 8),
+        anchor_mode: "reflow",
         paragraph_id,
         type: "note",
         text: content,
@@ -261,18 +416,55 @@ function createMcp() {
 
   server.tool("highlight_text", "克先生画荧光笔高亮", {
     book_id: z.string().describe("书籍ID"),
-    paragraph_id: z.number().describe("段落编号"),
-    text: z.string().describe("要高亮的原文片段（必须是段落中的原文）"),
-  }, async ({ book_id, paragraph_id, text }) => {
+    paragraph_id: z.number().optional().describe("段落编号（reflow 书）"),
+    text: z.string().optional().describe("要高亮的原文片段（reflow 书，或 fidelity quote 的兼容别名）"),
+    pdf_page: z.number().optional().describe("PDF 页码（fidelity 书）"),
+    quote: z.string().optional().describe("要高亮的 PDF 原文片段（fidelity 书）"),
+    prefix: z.string().optional().describe("quote 前文（fidelity 书）"),
+    suffix: z.string().optional().describe("quote 后文（fidelity 书）"),
+    position: z.number().optional().describe("页内文本位置（fidelity 书）"),
+  }, async ({ book_id, paragraph_id, text, pdf_page, quote, prefix, suffix, position }) => {
     return withFileLock(bookPath(book_id), async () => {
       const book = loadBook(book_id);
       if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
-      const para = book.paragraphs.find(p => p.id === paragraph_id);
+      if (!book.annotations) book.annotations = [];
+      if (isFidelityBook(book)) {
+        const page = parseInt(pdf_page, 10);
+        const total = getTotalPages(book);
+        const selected = quote || text || "";
+        if (!page || page < 1 || page > total) return { content: [{ type: "text", text: `PDF 页码无效。共${total}页。` }] };
+        if (!selected.trim()) return { content: [{ type: "text", text: "fidelity 高亮需要提供 quote。" }] };
+        if (!textIncludesQuote(getFidelityPageText(book, page), selected)) {
+          return { content: [{ type: "text", text: "这一页原文中找不到这段 quote，请确认引用准确。" }] };
+        }
+        const annot = {
+          id: randomUUID().slice(0, 8),
+          anchor_mode: "fidelity",
+          pdf_page: page,
+          quote: selected,
+          prefix: prefix || "",
+          suffix: suffix || "",
+          position: Number.isInteger(position) ? position : null,
+          rects: [],
+          type: "highlight",
+          text: selected,
+          author: "克先生",
+          reply_to: null,
+          created_at: new Date().toISOString(),
+        };
+        book.annotations.push(annot);
+        saveBook(book);
+        pushEvent({ type: "highlight", author: "克先生", book_id, book_title: book.title, pdf_page: page, text: selected.slice(0, 200) });
+        return { content: [{ type: "text", text: `已高亮 p.${page}：「${selected.slice(0, 40)}…」` }] };
+      }
+      if (!paragraph_id) return { content: [{ type: "text", text: "reflow 高亮需要提供 paragraph_id。" }] };
+      if (!text) return { content: [{ type: "text", text: "reflow 高亮需要提供 text。" }] };
+      const para = (book.paragraphs || []).find(p => p.id === paragraph_id);
       if (!para) return { content: [{ type: "text", text: `段落 §${paragraph_id} 不存在。` }] };
       if (!para.text.includes(text)) return { content: [{ type: "text", text: "原文中找不到这段文字，请确认引用准确。" }] };
-      if (!book.annotations) book.annotations = [];
       const annot = {
         id: randomUUID().slice(0, 8),
+        anchor_mode: "reflow",
         paragraph_id,
         type: "highlight",
         text,
@@ -296,7 +488,7 @@ function createMcp() {
     const book = loadBook(book_id);
     if (!book) return { content: [{ type: "text", text: "找不到这本书。" }] };
     ensurePages(book);
-    const totalPages = book.pages.length;
+    const totalPages = getTotalPages(book);
     const p = book.progress || { page: 0 };
     const pct = totalPages > 0 ? Math.round((p.page / totalPages) * 100) : 0;
     return { content: [{ type: "text", text: `《${book.title}》阅读进度：第${p.page}/${totalPages}页 (${pct}%)` }] };
@@ -311,7 +503,7 @@ function createMcp() {
     const vocab = book.vocab || [];
     if (vocab.length === 0) return { content: [{ type: "text", text: "生词本是空的。" }] };
     const text = `《${book.title}》生词本（${vocab.length}词）\n\n` + vocab.map(v => {
-      const para = book.paragraphs.find(p => p.id === v.paragraph_id);
+      const para = (book.paragraphs || []).find(p => p.id === v.paragraph_id);
       const ctx = para ? `\n  出处 [§${para.id}]: ${para.text.slice(0, 120)}` : "";
       return `• ${v.word} (ID: ${v.id})${v.note ? `\n  注: ${v.note}` : "\n  （还没有注解）"}${ctx}`;
     }).join("\n\n");
@@ -350,10 +542,17 @@ function createMcp() {
       if (!annots.length && !vocab.length) continue;
       const lines = [`《${book.title}》(ID: ${book.id})`];
       for (const a of annots) {
-        const para = book.paragraphs.find(p => p.id === a.paragraph_id);
-        if (a.type === "highlight") {
+        if (annotationMode(a) === "fidelity") {
+          const label = `[p.${a.pdf_page}]`;
+          if (a.type === "highlight") {
+            lines.push(`  📌 ${a.author} 划线 ${label}:「${a.quote || a.text}」`);
+          } else {
+            lines.push(`  💬 ${a.author} 批注 ${label}: ${a.text}${a.quote ? `\n     原文: ${a.quote}` : ""}`);
+          }
+        } else if (a.type === "highlight") {
           lines.push(`  📌 ${a.author} 划线 [§${a.paragraph_id}]:「${a.text}」`);
         } else {
+          const para = (book.paragraphs || []).find(p => p.id === a.paragraph_id);
           lines.push(`  💬 ${a.author} 批注 [§${a.paragraph_id}]: ${a.text}${para ? `\n     原文: ${para.text.slice(0, 100)}` : ""}`);
         }
       }
@@ -423,8 +622,23 @@ if (AUTH_KEY) {
 function makeBook(id, title, filename, paragraphs) {
   const pages = computePages(paragraphs);
   return {
-    id, title, filename, created_at: new Date().toISOString(),
+    id, title, filename, mode: "reflow", created_at: new Date().toISOString(),
     paragraphs, pages, annotations: [], bookmarks: [],
+    progress: { page: 1, updated_at: new Date().toISOString() },
+  };
+}
+
+function makeFidelityBook(id, title, filename, pageTexts) {
+  return {
+    id, title, filename, mode: "fidelity", created_at: new Date().toISOString(),
+    paragraphs: [],
+    page_texts: pageTexts,
+    page_count: pageTexts.length,
+    pages: Array.from({ length: pageTexts.length }, (_, i) => i + 1),
+    pdf_path: `pdfs/${id}.pdf`,
+    words_path: `words/${id}.json`,
+    annotations: [],
+    bookmarks: [],
     progress: { page: 1, updated_at: new Date().toISOString() },
   };
 }
@@ -437,6 +651,11 @@ app.post("/api/upload-book", upload.single("file"), async (req, res) => {
     const { originalname, path: tmpPath } = req.file;
     const id = randomUUID().slice(0, 8);
     const ext = originalname.split(".").pop().toLowerCase();
+    const mode = req.body.mode || "reflow";
+    if (!["reflow", "fidelity"].includes(mode)) {
+      try { unlinkSync(tmpPath); } catch {}
+      return res.status(400).json({ error: "Invalid mode. Use reflow or fidelity" });
+    }
 
     // Rename uploaded file to a safe UUID-based name to prevent path injection
     const safeName = randomUUID() + '.' + ext;
@@ -444,6 +663,10 @@ app.post("/api/upload-book", upload.single("file"), async (req, res) => {
     renameSync(tmpPath, safePath);
 
     if (ext === "txt") {
+      if (mode === "fidelity") {
+        try { unlinkSync(safePath); } catch {}
+        return res.status(400).json({ error: "fidelity mode is only supported for PDF files" });
+      }
       const rawBuf = readFileSync(safePath);
       let text = rawBuf.toString("utf-8");
       if (text.includes("�")) { text = iconv.decode(rawBuf, "gbk"); }
@@ -460,6 +683,36 @@ app.post("/api/upload-book", upload.single("file"), async (req, res) => {
     }
 
     if (ext === "pdf") {
+      if (mode === "fidelity") {
+        try {
+          const result = execFileSync('python3', [EXTRACT_FIDELITY, safePath], {
+            encoding: "utf-8", timeout: 180000, maxBuffer: 300 * 1024 * 1024,
+          });
+          const parsed = JSON.parse(result);
+          if (parsed.error) { try { unlinkSync(safePath); } catch {} return res.status(500).json({ error: parsed.error }); }
+          const title = parsed.title || originalname.replace(/\.pdf$/i, "");
+          const pageTexts = (parsed.pages || []).map(p => String(p.text || ""));
+          const book = makeFidelityBook(id, title, originalname, pageTexts);
+          const wordsPayload = {
+            book_id: id,
+            page_count: pageTexts.length,
+            pages: (parsed.pages || []).map(p => ({ n: p.n, words: p.words || [] })),
+          };
+          const dstPdf = pdfPath(id);
+          const dstWords = wordsPath(id);
+          writeFileSync(dstWords, JSON.stringify(wordsPayload), "utf-8");
+          wordsCache.set(id, wordsPayload);
+          renameSync(safePath, dstPdf);
+          saveBook(book);
+          return res.json({ ok: true, id, title, mode: "fidelity", paragraph_count: 0, page_count: pageTexts.length });
+        } catch (e) {
+          try { unlinkSync(safePath); } catch {}
+          try { unlinkSync(pdfPath(id)); } catch {}
+          try { unlinkSync(wordsPath(id)); } catch {}
+          wordsCache.delete(id);
+          return res.status(500).json({ error: `PDF fidelity extraction failed: ${e.message}` });
+        }
+      }
       try {
         const result = execFileSync('python3', [EXTRACT_SCRIPT, safePath], {
           encoding: "utf-8", timeout: 120000, maxBuffer: 100 * 1024 * 1024,
@@ -479,6 +732,10 @@ app.post("/api/upload-book", upload.single("file"), async (req, res) => {
     }
 
     if (ext === "epub") {
+      if (mode === "fidelity") {
+        try { unlinkSync(safePath); } catch {}
+        return res.status(400).json({ error: "fidelity mode is only supported for PDF files" });
+      }
       try {
         const result = execFileSync('python3', [EXTRACT_EPUB, safePath], {
           encoding: "utf-8", timeout: 120000, maxBuffer: 100 * 1024 * 1024,
@@ -514,10 +771,11 @@ app.get("/api/books/:id", (req, res) => {
   const book = loadBook(req.params.id);
   if (!book) return res.status(404).json({ error: "Not found" });
   ensurePages(book);
+  const totalPages = getTotalPages(book);
   res.json({
-    id: book.id, title: book.title, filename: book.filename,
-    paragraph_count: book.paragraphs.length,
-    page_count: book.pages.length,
+    id: book.id, title: book.title, filename: book.filename, mode: bookMode(book),
+    paragraph_count: book.paragraphs?.length || 0,
+    page_count: totalPages,
     annotation_count: (book.annotations || []).length,
     has_bookmark: !!book.bookmark,
     progress: book.progress,
@@ -530,8 +788,28 @@ app.get("/api/books/:id/pages/:page", (req, res) => {
   if (!book) return res.status(404).json({ error: "Not found" });
   ensurePages(book);
   const page = parseInt(req.params.page);
-  if (page < 1 || page > book.pages.length) return res.status(400).json({ error: `Invalid page. Total: ${book.pages.length}` });
+  const totalPages = getTotalPages(book);
+  if (page < 1 || page > totalPages) return res.status(400).json({ error: `Invalid page. Total: ${totalPages}` });
   res.json(getPage(book, page));
+});
+
+app.get("/api/books/:id/pdf", (req, res) => {
+  const book = loadBook(req.params.id);
+  if (!book) return res.status(404).json({ error: "Not found" });
+  if (!isFidelityBook(book)) return res.status(400).json({ error: "Book is not in fidelity mode" });
+  const p = pdfPath(book.id);
+  if (!existsSync(p)) return res.status(404).json({ error: "PDF not found" });
+  res.sendFile(p);
+});
+
+app.get("/api/books/:id/pdf-pages/:n", (req, res) => {
+  const book = loadBook(req.params.id);
+  if (!book) return res.status(404).json({ error: "Not found" });
+  if (!isFidelityBook(book)) return res.status(400).json({ error: "Book is not in fidelity mode" });
+  const n = parseInt(req.params.n, 10);
+  const total = getTotalPages(book);
+  if (n < 1 || n > total) return res.status(400).json({ error: `Invalid page. Total: ${total}` });
+  res.json({ n, text: getFidelityPageText(book, n), words: getFidelityWords(book, n) });
 });
 
 app.get("/api/books/:id/page-for/:paraId", (req, res) => {
@@ -550,7 +828,21 @@ app.get('/api/books/:id/search', (req, res) => {
   const q = (req.query.q || '').toLowerCase().trim();
   if (!q || q.length < 2) return res.json([]);
   const results = [];
-  for (const p of book.paragraphs) {
+  if (isFidelityBook(book)) {
+    for (let i = 1; i <= getTotalPages(book); i++) {
+      const text = getFidelityPageText(book, i);
+      const idx = text.toLowerCase().indexOf(q);
+      if (idx !== -1) {
+        const start = Math.max(0, idx - 30);
+        const end = Math.min(text.length, idx + q.length + 50);
+        const snippet = (start > 0 ? '...' : '') + text.slice(start, end) + (end < text.length ? '...' : '');
+        results.push({ pdf_page: i, page: i, snippet });
+        if (results.length >= 50) break;
+      }
+    }
+    return res.json(results);
+  }
+  for (const p of book.paragraphs || []) {
     const idx = p.text.toLowerCase().indexOf(q);
     if (idx !== -1) {
       const start = Math.max(0, idx - 30);
@@ -575,9 +867,9 @@ app.get("/api/books/:id/annotations", (req, res) => {
   let annots = book.annotations || [];
   if (req.query.author) annots = annots.filter(a => a.author === req.query.author);
   if (req.query.has_dialog === "true") {
-    const paraIds = new Set();
-    annots.forEach(a => { if (a.reply_to) paraIds.add(a.paragraph_id); });
-    annots = annots.filter(a => paraIds.has(a.paragraph_id));
+    const anchors = new Set();
+    annots.forEach(a => { if (a.reply_to) anchors.add(annotationAnchorKey(a)); });
+    annots = annots.filter(a => anchors.has(annotationAnchorKey(a)));
   }
   res.json(annots);
 });
@@ -587,27 +879,60 @@ app.post("/api/books/:id/annotations", async (req, res) => {
     const result = await withFileLock(bookPath(req.params.id), async () => {
       const book = loadBook(req.params.id);
       if (!book) return { status: 404, body: { error: "Not found" } };
-      const { paragraph_id, type, text, highlight_id } = req.body;
-      if (!paragraph_id) return { status: 400, body: { error: "Missing paragraph_id" } };
+      const { paragraph_id, type, text, highlight_id, reply_to } = req.body;
       if (!book.annotations) book.annotations = [];
-      const annot = {
-        id: randomUUID().slice(0, 8),
-        paragraph_id,
-        type: type || "highlight",
-        text: text || "",
-        author: req.body.author || "音音",
-        reply_to: null,
-        highlight_id: highlight_id || null,
-        created_at: new Date().toISOString(),
-      };
+      let annot;
+      let pushPayload;
+      if (isFidelityBook(book)) {
+        const pdfPage = parseInt(req.body.pdf_page, 10);
+        const quote = String(req.body.quote || "");
+        const total = getTotalPages(book);
+        if (!pdfPage || pdfPage < 1 || pdfPage > total) return { status: 400, body: { error: `Invalid pdf_page. Total: ${total}` } };
+        if (!quote.trim()) return { status: 400, body: { error: "Missing quote" } };
+        annot = {
+          id: randomUUID().slice(0, 8),
+          anchor_mode: "fidelity",
+          pdf_page: pdfPage,
+          quote,
+          prefix: req.body.prefix || "",
+          suffix: req.body.suffix || "",
+          position: Number.isInteger(req.body.position) ? req.body.position : null,
+          rects: Array.isArray(req.body.rects) ? req.body.rects : [],
+          type: type || "highlight",
+          text: text || (type === "note" ? "" : quote),
+          author: req.body.author || "音音",
+          reply_to: reply_to || null,
+          highlight_id: highlight_id || null,
+          created_at: new Date().toISOString(),
+        };
+        pushPayload = {
+          type: annot.type, author: annot.author, book_id: book.id, book_title: book.title,
+          pdf_page: pdfPage, text: (annot.text || annot.quote || "").slice(0, 200),
+          paragraph_text: getFidelityPageText(book, pdfPage).slice(0, 200),
+        };
+      } else {
+        if (!paragraph_id) return { status: 400, body: { error: "Missing paragraph_id" } };
+        annot = {
+          id: randomUUID().slice(0, 8),
+          anchor_mode: "reflow",
+          paragraph_id,
+          type: type || "highlight",
+          text: text || "",
+          author: req.body.author || "音音",
+          reply_to: reply_to || null,
+          highlight_id: highlight_id || null,
+          created_at: new Date().toISOString(),
+        };
+        const para = (book.paragraphs || []).find(p => p.id === paragraph_id);
+        pushPayload = {
+          type: annot.type, author: annot.author, book_id: book.id, book_title: book.title,
+          paragraph_id, text: (annot.text || "").slice(0, 200),
+          paragraph_text: (para?.text || "").slice(0, 200),
+        };
+      }
       book.annotations.push(annot);
       saveBook(book);
-      const para = book.paragraphs.find(p => p.id === paragraph_id);
-      pushEvent({
-        type: annot.type, author: annot.author, book_id: book.id, book_title: book.title,
-        paragraph_id, text: (annot.text || "").slice(0, 200),
-        paragraph_text: (para?.text || "").slice(0, 200),
-      });
+      pushEvent(pushPayload);
       return { status: 200, body: annot };
     });
     res.status(result.status).json(result.body);
@@ -790,7 +1115,13 @@ app.delete("/api/books/:id", async (req, res) => {
     const result = await withFileLock(bookPath(req.params.id), async () => {
       const p = bookPath(req.params.id);
       if (!existsSync(p)) return { status: 404, body: { error: "Not found" } };
+      const book = loadBook(req.params.id);
       unlinkSync(p);
+      if (book && isFidelityBook(book)) {
+        try { unlinkSync(pdfPath(book.id)); } catch {}
+        try { unlinkSync(wordsPath(book.id)); } catch {}
+        wordsCache.delete(book.id);
+      }
       return { status: 200, body: { ok: true } };
     });
     res.status(result.status).json(result.body);
@@ -804,6 +1135,11 @@ app.post("/api/reindex", (req, res) => {
   for (const f of files) {
     try {
       const book = JSON.parse(readFileSync(`${DATA_DIR}/${f}`, "utf-8"));
+      if (isFidelityBook(book)) {
+        ensurePages(book);
+        count++;
+        continue;
+      }
       if (!book.id || !book.paragraphs) continue;
       book.pages = computePages(book.paragraphs);
       saveBook(book);
