@@ -59,8 +59,11 @@
 /* ===== RESET ===== */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* 横向锁死：iOS WebView 里页面不准左右晃（音音 07-03） */
-html, body { overflow-x: hidden; }
+/* 横向锁死：iOS WebView 里页面不准左右晃（音音 07-03）。
+   必须用 clip 不能用 hidden——body 上的 overflow-x:hidden 会创建裁剪容器，
+   把 .reader-topbar 的 sticky 参照系从视口偷换成 body（顶栏跟内容一起滚走，
+   音音 07-03 实测踩中）；clip 纯裁剪、不动定位语义。 */
+html, body { overflow-x: clip; }
 
 body {
   background: var(--bg);
