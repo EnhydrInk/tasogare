@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import multer from "multer";
-import { randomUUID, createHash } from "crypto";
+import { randomUUID, createHash, timingSafeEqual } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, renameSync } from "fs";
 import { execFileSync } from "child_process";
 import { join, dirname } from "path";
@@ -382,6 +382,40 @@ function createMcp() {
 const app = express();
 const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 150 * 1024 * 1024 } });
 app.use((req, res, next) => { console.log(`[DEBUG] ${req.method} ${req.path}`); next(); });
+
+// --- 私密站极简 auth ---
+// TASOGARE_AUTH_KEY 不设 = 关闭（本地开发免登录）。设了之后：
+// 首次访问带 ?key=<AUTH_KEY> → 种 cookie + 303 回落无 key 的同路径；此后全靠 cookie。
+// 放行：/health（探活）、/mcp* 与 OAuth 端点（MCP 走自己的 Bearer token）。
+const AUTH_KEY = process.env.TASOGARE_AUTH_KEY || "";
+const AUTH_COOKIE = AUTH_KEY ? createHash("sha256").update(AUTH_KEY).digest("hex") : "";
+
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+if (AUTH_KEY) {
+  app.use((req, res, next) => {
+    if (req.path === "/health" || req.path.startsWith("/mcp") ||
+        req.path.startsWith("/.well-known") ||
+        req.path === "/authorize" || req.path === "/token" || req.path === "/register") {
+      return next();
+    }
+    const cookies = {};
+    for (const part of (req.headers.cookie || "").split(";")) {
+      const i = part.indexOf("=");
+      if (i > 0) cookies[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+    }
+    if (cookies.tasogare_auth && safeEqual(cookies.tasogare_auth, AUTH_COOKIE)) return next();
+    if (typeof req.query.key === "string" && safeEqual(req.query.key, AUTH_KEY)) {
+      res.set("Set-Cookie",
+        `tasogare_auth=${AUTH_COOKIE}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`);
+      return res.redirect(303, req.path);
+    }
+    return res.status(401).json({ error: "unauthorized" });
+  });
+}
 
 function makeBook(id, title, filename, paragraphs) {
   const pages = computePages(paragraphs);
