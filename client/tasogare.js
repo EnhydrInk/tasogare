@@ -894,7 +894,7 @@ function renderShelf() {
       <div class="header-nav">
         <div></div>
         <div class="nav-actions">
-          <label class="nav-btn" for="fileInput">${SVG.plus} Upload</label>
+          <label class="nav-btn btn-upload" for="fileInput">${SVG.plus} Upload</label>
         </div>
       </div>
       <div class="page-title">Tasogare</div>

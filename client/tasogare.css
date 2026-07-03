@@ -83,7 +83,7 @@ body {
 /* ===== BACK LINK ===== */
 .back-link {
   position: fixed;
-  top: 12px;
+  top: calc(12px + env(safe-area-inset-top, 0px));
   left: 16px;
   z-index: 1000;
   text-decoration: none;
@@ -98,7 +98,7 @@ body {
 
 /* ===== HEADER ===== */
 .page-header {
-  padding: 56px 0 20px;
+  padding: calc(56px + env(safe-area-inset-top, 0px)) 0 20px;
 }
 
 .header-nav {
@@ -148,6 +148,16 @@ body {
   padding: 4px 0;
 }
 .nav-btn:hover { opacity: 0.7; }
+/* 书架 Upload：真按钮（音音 07-03——别再让它是一行小字） */
+.nav-btn.btn-upload {
+  padding: 10px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.nav-btn.btn-upload svg { width: 13px; height: 13px; }
 .nav-btn svg { width: 11px; height: 11px; }
 .nav-btn.subtle { color: var(--ink3); }
 
@@ -549,7 +559,7 @@ body {
   z-index: 20;
   background: var(--surface);
   border-bottom: 0.5px solid var(--border);
-  padding: 0 20px;
+  padding: env(safe-area-inset-top, 0px) 20px 0;
   display: flex;
   align-items: center;
   min-height: 44px;
@@ -1602,7 +1612,7 @@ mark.hl-both:hover {
 /* ===== BOOKMARK RIBBON ===== */
 .bookmark-ribbon {
   position: fixed;
-  top: 44px;
+  top: calc(44px + env(safe-area-inset-top, 0px));
   right: 0;
   z-index: 15;
   width: 24px;
