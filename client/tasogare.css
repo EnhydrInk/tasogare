@@ -256,16 +256,9 @@ body {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
-.upload-zone { position: relative; }
-/* input 铺满 zone：iOS WebView 里手指直接命中原生 input 比程序化 click() 可靠 */
-.upload-zone input {
-  display: block;
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
+/* 手机上藏大 drop zone（桌面拖拽范式，窄屏纯占地）——右上角 Upload label 是唯一入口（音音 07-03） */
+@media (max-width: 600px) {
+  .upload-zone { display: none; }
 }
 .upload-glyph {
   font-family: var(--font-display);
