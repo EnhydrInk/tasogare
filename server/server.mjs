@@ -402,6 +402,9 @@ if (AUTH_KEY) {
         req.path === "/authorize" || req.path === "/token" || req.path === "/register") {
       return next();
     }
+    // 服务间通道：backend 轮询 /api/reading-status 带 Bearer <AUTH_KEY>（同 .env 值）
+    const auth = req.headers.authorization || "";
+    if (auth.startsWith("Bearer ") && safeEqual(auth.slice(7), AUTH_KEY)) return next();
     const cookies = {};
     for (const part of (req.headers.cookie || "").split(";")) {
       const i = part.indexOf("=");
