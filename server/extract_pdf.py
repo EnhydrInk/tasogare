@@ -96,6 +96,9 @@ def looks_like_new_paragraph(line, prev_buf):
         return True
     return False
 
+# multer 落盘名是 randomUUID().ext，兜到它等于没有标题——返空让 server 用 originalname
+UUID_NAME = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+
 def extract_title(pdf_path):
     doc = pymupdf.open(pdf_path)
     meta = doc.metadata
@@ -106,6 +109,8 @@ def extract_title(pdf_path):
         return title
 
     name = os.path.splitext(os.path.basename(pdf_path))[0]
+    if UUID_NAME.match(name):
+        return ""
     for pat in ['z-library.sk, 1lib.sk, z-lib.sk', 'z-librarysk 1libsk z-libsk',
                 'Z-Library', 'z-lib.sk', '1lib.sk', '(z-library', '(Z-Library']:
         name = name.replace(pat, '')

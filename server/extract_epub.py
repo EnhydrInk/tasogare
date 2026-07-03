@@ -80,7 +80,9 @@ def extract_epub(epub_path):
     except:
         pass
     if not title or len(title) < 2:
-        title = os.path.splitext(os.path.basename(epub_path))[0]
+        name = os.path.splitext(os.path.basename(epub_path))[0]
+        # multer 落盘名是 randomUUID().ext，兜到它等于没有标题——返空让 server 用 originalname
+        title = "" if re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", name, re.I) else name
 
     # Extract TOC
     toc = extract_toc(book)
