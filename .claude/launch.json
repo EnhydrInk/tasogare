@@ -5,7 +5,7 @@
       "name": "tasogare",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "server"],
-      "port": 18008
+      "port": 18010
     }
   ]
 }

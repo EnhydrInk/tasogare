@@ -39,7 +39,7 @@ node server.mjs
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `PORT` | `18008` | 监听端口 |
+| `PORT` | `18010` | 监听端口 |
 | `HOST` | `127.0.0.1` | 监听地址 |
 | `DATA_DIR` | `/opt/tasogare/data` | 书籍 JSON 存储目录 |
 | `UPLOAD_DIR` | `/opt/tasogare/uploads` | 上传临时目录 |
@@ -52,7 +52,7 @@ node server.mjs
 ```bash
 cp -r data.example data
 cd server && DATA_DIR=../data UPLOAD_DIR=../uploads node server.mjs
-# 浏览器打开 http://127.0.0.1:18008
+# 浏览器打开 http://127.0.0.1:18010
 ```
 
 ## 数据模型

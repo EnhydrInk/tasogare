@@ -16,7 +16,7 @@ process.on("uncaughtException", (err) => { console.error("UNCAUGHT:", err.stack 
 process.on("unhandledRejection", (err) => { console.error("UNHANDLED:", err.stack || err.message); });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = parseInt(process.env.PORT || "18008", 10);
+const PORT = parseInt(process.env.PORT || "18010", 10);
 const HOST = process.env.HOST || "127.0.0.1";
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 const DATA_DIR = process.env.DATA_DIR || "/opt/tasogare/data";
