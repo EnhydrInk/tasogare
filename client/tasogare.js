@@ -904,7 +904,7 @@ function renderShelf() {
     <div class="upload-zone" id="uploadZone">
       <input type="file" id="fileInput" accept=".pdf,.txt,.epub">
       <div class="upload-glyph">§</div>
-      <div class="upload-label">drop a pdf / epub / txt here</div>
+      <div class="upload-label">tap or drop a pdf / epub / txt</div>
     </div>
     ${state.loading ? '<div class="loading">loading...</div>' : booksHtml}
   </div>`;
@@ -1408,7 +1408,10 @@ function bindEvents() {
   const uploadZone = document.getElementById('uploadZone');
   const fileInput = document.getElementById('fileInput');
   if (uploadZone && fileInput) {
-    uploadZone.addEventListener('click', () => fileInput.click());
+    uploadZone.addEventListener('click', (e) => {
+      // input 已铺满 zone，手指直接点到 input 时不再程序化触发（防双开 picker）
+      if (e.target !== fileInput) fileInput.click();
+    });
     uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragover'); });
     uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
     uploadZone.addEventListener('drop', (e) => {
