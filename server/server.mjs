@@ -525,8 +525,13 @@ function createMcp() {
     const vocab = book.vocab || [];
     if (vocab.length === 0) return { content: [{ type: "text", text: "生词本是空的。" }] };
     const text = `《${book.title}》生词本（${vocab.length}词）\n\n` + vocab.map(v => {
-      const para = (book.paragraphs || []).find(p => p.id === v.paragraph_id);
-      const ctx = para ? `\n  出处 [§${para.id}]: ${para.text.slice(0, 120)}` : "";
+      let ctx = "";
+      if (v.pdf_page) {
+        ctx = `\n  出处 [p.${v.pdf_page}]: ${getFidelityPageText(book, v.pdf_page).slice(0, 120)}`;
+      } else {
+        const para = (book.paragraphs || []).find(p => p.id === v.paragraph_id);
+        if (para) ctx = `\n  出处 [§${para.id}]: ${para.text.slice(0, 120)}`;
+      }
       return `• ${v.word} (ID: ${v.id})${v.note ? `\n  注: ${v.note}` : "\n  （还没有注解）"}${ctx}`;
     }).join("\n\n");
     return { content: [{ type: "text", text }] };
@@ -1071,12 +1076,16 @@ app.post("/api/books/:id/vocab", async (req, res) => {
       const { word, paragraph_id, note } = req.body;
       if (!word) return { status: 400, body: { error: "Missing word" } };
       if (!book.vocab) book.vocab = [];
-      const exists = book.vocab.find(v => v.word.toLowerCase() === word.toLowerCase() && v.paragraph_id === paragraph_id);
+      // fidelity 书的生词锚是 PDF 页；与 paragraph_id 各自独立存在，不复用字段
+      const pdfPage = parsePositiveInt(req.body.pdf_page);
+      const exists = book.vocab.find(v => v.word.toLowerCase() === word.toLowerCase()
+        && v.paragraph_id === (paragraph_id || null) && (v.pdf_page || null) === pdfPage);
       if (exists) return { status: 200, body: exists };
       const entry = {
         id: randomUUID().slice(0, 8),
         word: word.trim(),
         paragraph_id: paragraph_id || null,
+        pdf_page: pdfPage,
         note: note || "",
         created_at: new Date().toISOString(),
       };

@@ -42,6 +42,9 @@ let state = {
   panelParaId: null,
   panelHighlightText: null,
   panelAnnotId: null,
+  // fidelity 书的 panel 锚（panelParaId 的 PDF 页版；两套字段不复用）
+  panelPdfPage: null,
+  panelQuote: null,
 };
 
 // ===== UTILITY =====
@@ -75,11 +78,17 @@ async function loadBooks() {
   state.loading = false; render();
 }
 
-async function uploadFile(file) {
+async function uploadFile(file, mode) {
+  // PDF 先问一嘴：重排（纯文本分页）还是原版（pdf.js 渲染，公式书用）
+  if (!mode && /\.pdf$/i.test(file.name)) {
+    showUploadModePicker(file);
+    return;
+  }
   state.loading = true; render();
   try {
     const form = new FormData();
     form.append('file', file);
+    if (mode) form.append('mode', mode);
     const res = await fetch(API + '/upload-book', { method: 'POST', body: form });
     const result = await res.json();
     if (result.ok) {
@@ -92,6 +101,30 @@ async function uploadFile(file) {
     alert('Upload failed: ' + e.message);
     state.loading = false; render();
   }
+}
+
+function showUploadModePicker(file) {
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.innerHTML = `
+    <div class="dialog-box">
+      <div class="dialog-text">How should this PDF be read?</div>
+      <div class="mode-pick" id="modePickReflow">
+        <div class="mode-pick-name">Reflow · 重排</div>
+        <div class="mode-pick-desc">纯文本分页，可调字号。小说、散文。</div>
+      </div>
+      <div class="mode-pick" id="modePickFidelity">
+        <div class="mode-pick-name">Fidelity · 原版</div>
+        <div class="mode-pick-desc">保留原版排版。公式、图表、教科书。</div>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-btn" onclick="this.closest('.dialog-overlay').remove()">Cancel</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  overlay.querySelector('#modePickReflow').addEventListener('click', () => { overlay.remove(); uploadFile(file, 'reflow'); });
+  overlay.querySelector('#modePickFidelity').addEventListener('click', () => { overlay.remove(); uploadFile(file, 'fidelity'); });
 }
 
 async function openDetail(id) {
@@ -111,6 +144,19 @@ async function openBook(id) {
   state.loading = true; render();
   const book = await api('/books/' + id);
   state.currentBook = book;
+  if (book.mode === 'fidelity') {
+    // fidelity：bookmark 是段落语义，不适用；进度就是 PDF 页
+    state.currentPage = Math.max(1, book.progress?.page || 1);
+    state.bookmark = null;
+    state.paragraphs = [];
+    state.toc = [];
+    state.annotations = (await api('/books/' + id + '/annotations')) || [];
+    state.vocab = (await api('/books/' + id + '/vocab')) || [];
+    await loadPage();
+    state.view = 'reading';
+    state.loading = false; render();
+    return;
+  }
   const bmData = await api('/books/' + id + '/bookmarks');
   const bmPara = bmData?.bookmark || null;
   if (bmPara) {
@@ -136,6 +182,16 @@ async function openBook(id) {
 }
 
 async function loadPage() {
+  if (isFid()) {
+    // 正文由 pdf.js 画（render 后 fidelityMount），这里只走进度上报
+    state.paragraphs = [];
+    state.totalPages = state.currentBook.page_count || 0;
+    api(`/books/${state.currentBook.id}/progress`, {
+      method: 'PUT',
+      body: JSON.stringify({ page: state.currentPage }),
+    });
+    return;
+  }
   const data = await api(`/books/${state.currentBook.id}/pages/${state.currentPage}`);
   state.paragraphs = data.paragraphs;
   state.totalPages = data.total_pages;
@@ -207,11 +263,16 @@ async function renameBook(id) {
 }
 
 // ===== VOCAB =====
-async function addVocab(word, paraId) {
+async function addVocab(word, paraId, fidPage) {
   showDialog('Add vocab', 'Note for "' + word + '":', '', async (note) => {
     const v = await api(`/books/${state.currentBook.id}/vocab`, {
       method: 'POST',
-      body: JSON.stringify({ word, paragraph_id: paraId, note: note || '' }),
+      body: JSON.stringify({
+        word,
+        paragraph_id: paraId || null,
+        pdf_page: fidPage || null,
+        note: note || '',
+      }),
     });
     state.vocab.push(v);
     render();
@@ -452,8 +513,25 @@ function applyVocabUnderlines(html, words) {
 function openAnnotPanel(paraId, highlightText, annotId) {
   state.panelOpen = true;
   state.panelParaId = paraId;
+  state.panelPdfPage = null;
+  state.panelQuote = null;
   state.panelHighlightText = highlightText || null;
   state.panelAnnotId = annotId || null;
+  renderAnnotPanel();
+  requestAnimationFrame(() => {
+    document.getElementById('annotPanelBackdrop').classList.add('open');
+    document.getElementById('annotPanel').classList.add('open');
+  });
+}
+
+// fidelity 版：从 overlay 命中的 annotation 打开（锚 = pdf_page + quote）
+function openFidAnnotPanel(annot) {
+  state.panelOpen = true;
+  state.panelParaId = null;
+  state.panelPdfPage = annot.pdf_page;
+  state.panelQuote = annot.quote || null;
+  state.panelHighlightText = annot.quote || null;
+  state.panelAnnotId = annot.type === 'highlight' ? annot.id : (annot.highlight_id || null);
   renderAnnotPanel();
   requestAnimationFrame(() => {
     document.getElementById('annotPanelBackdrop').classList.add('open');
@@ -502,8 +580,13 @@ function renderAnnotPanel() {
   const panel = document.getElementById('annotPanelContent');
   const paraId = state.panelParaId;
   const hlText = state.panelHighlightText;
+  const fidPage = state.panelPdfPage;
 
-  const paraAnnots = state.annotations.filter(a => a.paragraph_id === paraId);
+  // 两种锚各走各的过滤；fidelity 按 quote 聚焦到点开的那条划线
+  const paraAnnots = fidPage != null
+    ? state.annotations.filter(a => a.anchor_mode === 'fidelity' && a.pdf_page === fidPage &&
+        (!state.panelQuote || a.quote === state.panelQuote))
+    : state.annotations.filter(a => a.paragraph_id === paraId);
   const highlights = paraAnnots.filter(a => a.type === 'highlight');
   const notes = paraAnnots.filter(a => a.type === 'note');
 
@@ -586,7 +669,7 @@ function renderAnnotPanel() {
 
   panel.innerHTML = `
     <div class="annot-panel-header">
-      <span class="annot-panel-title">¶${paraId}</span>
+      <span class="annot-panel-title">${fidPage != null ? 'p.' + fidPage : '¶' + paraId}</span>
       <button class="annot-panel-close" onclick="closeAnnotPanel()">${SVG.x}</button>
     </div>
     ${hlText ? '<div class="annot-panel-quote">' + esc(hlText) + '</div>' : ''}
@@ -602,7 +685,11 @@ async function submitPanelNote() {
   if (!input || !input.value.trim()) return;
   const text = input.value.trim();
   input.value = '';
-  await addNote(state.panelParaId, text);
+  if (state.panelPdfPage != null) {
+    await addFidNote(state.panelPdfPage, state.panelQuote || '', text, state.panelAnnotId);
+  } else {
+    await addNote(state.panelParaId, text);
+  }
 }
 
 async function confirmDeleteAnnot(id, type) {
@@ -617,7 +704,10 @@ async function confirmDeleteAnnot(id, type) {
     state.annotations = state.annotations.filter(a => a.id !== hlId && !(a.highlight_id === hlId && a.id !== id));
   }
   await deleteAnnotation(id);
-  const remaining = state.annotations.filter(a => a.paragraph_id === state.panelParaId);
+  const remaining = state.panelPdfPage != null
+    ? state.annotations.filter(a => a.anchor_mode === 'fidelity' && a.pdf_page === state.panelPdfPage &&
+        (!state.panelQuote || a.quote === state.panelQuote))
+    : state.annotations.filter(a => a.paragraph_id === state.panelParaId);
   if (remaining.length === 0) {
     closeAnnotPanel();
   } else {
@@ -643,20 +733,27 @@ function initSelectionHandler() {
   // Save selection before click events clear it
   let _savedSelText = '';
   let _savedSelParaId = null;
+  let _savedFidAnchor = null;   // fidelity 三件套锚（异步收集，button click 时取）
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) {
+      _savedSelText = sel.toString().trim();
+      if (isFid()) {
+        _savedSelParaId = null;
+        _savedFidAnchor = null;
+        fidCollectSelection(sel).then(a => { _savedFidAnchor = a; });
+      } else {
+        _savedSelParaId = getParaIdFromSelection(sel);
+        _savedFidAnchor = null;
+      }
+    }
+  };
   document.getElementById('selToolbar').addEventListener('mousedown', (e) => {
     e.preventDefault(); // Prevent selection from being cleared
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) {
-      _savedSelText = sel.toString().trim();
-      _savedSelParaId = getParaIdFromSelection(sel);
-    }
+    saveSelection();
   });
-  document.getElementById('selToolbar').addEventListener('touchstart', (e) => {
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) {
-      _savedSelText = sel.toString().trim();
-      _savedSelParaId = getParaIdFromSelection(sel);
-    }
+  document.getElementById('selToolbar').addEventListener('touchstart', () => {
+    saveSelection();
   }, { passive: true });
 
   document.getElementById('selHighlightBtn').addEventListener('click', async (e) => {
@@ -664,20 +761,28 @@ function initSelectionHandler() {
     e.stopPropagation();
     const text = _savedSelText;
     const paraId = _savedSelParaId;
-    if (!text || !paraId) return;
+    if (!text) return;
 
-    const existingHl = state.annotations.find(
-      a => a.type === 'highlight' && a.text === text && a.paragraph_id === paraId && a.author !== '克先生'
-    );
-
-    if (existingHl) {
-      await deleteAnnotation(existingHl.id);
+    if (isFid()) {
+      const anchor = _savedFidAnchor;
+      if (!anchor) return;   // 收集失败/还没就绪——宁可不写也不写坏锚
+      const existingHl = state.annotations.find(
+        a => a.type === 'highlight' && a.anchor_mode === 'fidelity' &&
+             a.pdf_page === anchor.pdf_page && a.quote === anchor.quote && a.author !== '克先生'
+      );
+      if (existingHl) await deleteAnnotation(existingHl.id);
+      else await addFidHighlight(anchor);
     } else {
-      await addHighlight(paraId, text);
+      if (!paraId) return;
+      const existingHl = state.annotations.find(
+        a => a.type === 'highlight' && a.text === text && a.paragraph_id === paraId && a.author !== '克先生'
+      );
+      if (existingHl) await deleteAnnotation(existingHl.id);
+      else await addHighlight(paraId, text);
     }
 
     window.getSelection()?.removeAllRanges();
-    _savedSelText = ''; _savedSelParaId = null;
+    _savedSelText = ''; _savedSelParaId = null; _savedFidAnchor = null;
     hideSelToolbar();
   });
 
@@ -687,11 +792,12 @@ function initSelectionHandler() {
     e.stopPropagation();
     const text = _savedSelText;
     const paraId = _savedSelParaId;
+    const fidPage = isFid() ? (_savedFidAnchor?.pdf_page || state.currentPage) : null;
     if (!text) return;
     window.getSelection()?.removeAllRanges();
-    _savedSelText = ''; _savedSelParaId = null;
+    _savedSelText = ''; _savedSelParaId = null; _savedFidAnchor = null;
     hideSelToolbar();
-    addVocab(text, paraId);
+    addVocab(text, paraId, fidPage);
   });
 
   // Handle Copy button click (selection toolbar)
@@ -731,6 +837,13 @@ function initSelectionHandler() {
       openAnnotPanel(paraId, hlText, annotIds);
       return;
     }
+    // fidelity：overlay 压在 TextLayer 下面不吃事件，点击走坐标 hit-test
+    if (isFid() && state.view === 'reading' && e.target.closest('#fidStage')) {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;   // 正在选字，别抢
+      const hit = fidHitTest(e.clientX, e.clientY);
+      if (hit) openFidAnnotPanel(hit);
+    }
   });
 
   // Backdrop click closes panel
@@ -743,6 +856,17 @@ function handleSelectionChange() {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.toString().trim()) {
     hideSelToolbar();
+    return;
+  }
+
+  if (isFid()) {
+    // fidelity：选区要落在 TextLayer 里
+    const textDiv = document.getElementById('fidText');
+    if (!textDiv || !textDiv.contains(sel.anchorNode)) {
+      hideSelToolbar();
+      return;
+    }
+    document.getElementById('selToolbar').classList.add('visible');
     return;
   }
 
@@ -789,6 +913,7 @@ function backFromReader() {
   closeAnnotPanel();
   hideSelToolbar();
   hideFontsizePanel();
+  if (isFid()) fidCloseDoc();   // WebView worker 泄漏，离场即销毁
   if (state.currentBook) {
     openDetail(state.currentBook.id);
   } else {
@@ -860,6 +985,9 @@ function render() {
   }
 
   bindEvents();
+
+  // fidelity：骨架落地后异步画 PDF 页（内部有竞态票据，翻页快也不串页）
+  if (state.view === 'reading' && isFid()) fidelityMount();
 }
 
 // ===== SHELF =====
@@ -915,16 +1043,20 @@ function renderDetail() {
   const totalPages = b.total_pages || 0;
   const myPct = totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0;
 
+  const isFidBook = b.mode === 'fidelity';
   const kieranAnnots = state.detailAnnotations.filter(a => a.author === '克先生');
-  const kieranMaxPara = kieranAnnots.length > 0 ? Math.max(...kieranAnnots.map(a => a.paragraph_id)) : 0;
-  const paraCount = b.paragraph_count || 0;
+  // 克先生读到哪：reflow 按段落号/段落总数，fidelity 按 PDF 页/总页数
+  const anchorOf = a => (a.anchor_mode === 'fidelity' ? a.pdf_page : a.paragraph_id) || 0;
+  const kieranMaxPara = kieranAnnots.length > 0 ? Math.max(...kieranAnnots.map(anchorOf)) : 0;
+  const paraCount = isFidBook ? (totalPages || 0) : (b.paragraph_count || 0);
   const kieranPct = paraCount > 0 ? Math.min(100, Math.round((kieranMaxPara / paraCount) * 100)) : 0;
   const hasKieranProgress = kieranMaxPara > 0;
 
   const grouped = {};
   state.detailAnnotations.forEach(a => {
-    if (!grouped[a.paragraph_id]) grouped[a.paragraph_id] = [];
-    grouped[a.paragraph_id].push(a);
+    const key = anchorOf(a);
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(a);
   });
   const sortedGroups = Object.keys(grouped).map(Number).sort((a, b) => a - b);
 
@@ -991,7 +1123,7 @@ function renderDetail() {
         return `
         <div class="annot-group">
           <button class="annot-group-toggle" onclick="toggleDetailPara(${pid})">
-            <span class="annot-group-pid">¶${pid}</span>
+            <span class="annot-group-pid">${isFidBook ? 'p.' + pid : '¶' + pid}</span>
             <span class="annot-group-right">
               <span class="annot-group-n">${items.length}</span>
               <span class="annot-group-chevron ${isOpen ? 'open' : ''}">${SVG.chevronDown}</span>
@@ -1124,6 +1256,8 @@ function renderReading() {
   const pct = state.totalPages > 0 ? Math.round((state.currentPage / state.totalPages) * 100) : 0;
   const isBookmarked = isCurrentPageBookmarked();
 
+  if (isFid()) return renderReadingFidelity(b, pct);
+
   return `
   <div class="reader-topbar">
     <div class="reader-topbar-left">
@@ -1170,6 +1304,59 @@ function renderReading() {
       <button class="bottombar-btn ${isBookmarked ? 'active' : ''}" onclick="toggleCurrentPageBookmark()" title="Bookmark">
         ${isBookmarked ? SVG.bookmarkFill : SVG.bookmark}
         <span class="bottombar-btn-label">Mark</span>
+      </button>
+    </div>
+  </div>`;
+}
+
+// fidelity 版阅读视图：pdf.js 三层（canvas / 高亮 overlay / TextLayer）。
+// TOC / 字号 / 书签是重排语义，fidelity 不出；Notes / Vocab / slider 照旧。
+function renderReadingFidelity(b, pct) {
+  return `
+  <div class="reader-topbar">
+    <div class="reader-topbar-left">
+      <button class="nav-back" onclick="backFromReader()">${SVG.chevronLeft} Back</button>
+    </div>
+    <div class="reader-topbar-title">${esc(b.title)}</div>
+    <div class="reader-topbar-right"><button class="nav-btn subtle" onclick="openSearch()" title="Search" style="font-size:14px">⚲</button></div>
+  </div>
+  <div class="reader-progress"><div class="reader-progress-fill" style="width:${pct}%"></div></div>
+  <div class="folio reader-folio fid-folio fade-in">
+    <div class="pdf-stage" id="fidStage">
+      <div class="pdf-page-wrap" id="fidWrap">
+        <canvas id="fidCanvas"></canvas>
+        <div class="fid-overlay" id="fidOverlay"></div>
+        <div class="textLayer" id="fidText"></div>
+      </div>
+      <div class="fid-loading visible" id="fidLoading">rendering page...</div>
+    </div>
+    <div class="page-nav">
+      <button class="page-nav-btn" onclick="goPage(${state.currentPage - 1})" ${state.currentPage <= 1 ? 'disabled' : ''}>
+        ${SVG.chevronLeft} Prev
+      </button>
+      <span class="page-nav-center">${state.currentPage} / ${state.totalPages}</span>
+      <button class="page-nav-btn" onclick="goPage(${state.currentPage + 1})" ${state.currentPage >= state.totalPages ? 'disabled' : ''}>
+        Next ${SVG.chevronRight}
+      </button>
+    </div>
+  </div>
+  <div class="reader-bottombar" id="readerBottombar">
+    <div class="reader-bottombar-page">
+      <span class="page-slider-label">p.${state.currentPage} / ${state.totalPages}</span>
+      <input type="range" class="page-slider" min="1" max="${state.totalPages}" value="${state.currentPage}" oninput="this.previousElementSibling.textContent='p.'+this.value+' / ${state.totalPages}'" onchange="goPage(parseInt(this.value))">
+    </div>
+    <div class="reader-bottombar-icons">
+      <button class="bottombar-btn" onclick="showAnnotations()" title="Annotations">
+        ${SVG.annotations}
+        <span class="bottombar-btn-label">Notes</span>
+      </button>
+      <button class="bottombar-btn" onclick="showVocab()" title="Vocab">
+        ${SVG.vocabList}
+        <span class="bottombar-btn-label">Vocab</span>
+      </button>
+      <button class="bottombar-btn" onclick="toggleNight()" title="Night mode">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3 5.5 5.5 0 1 0 13 9.5z"/></svg>
+        <span class="bottombar-btn-label">Night</span>
       </button>
     </div>
   </div>`;
@@ -1264,11 +1451,13 @@ function renderAnnotationsOverview() {
   else if (state.annotFilter === 'yinyin') annots = annots.filter(a => a.author !== '克先生');
   else if (state.annotFilter === 'kieran') annots = annots.filter(a => a.author === '克先生');
 
-  // Group by paragraph
+  // Group by anchor：reflow 按段落、fidelity 按 PDF 页（key 加前缀区分，排序都按数字）
+  const fid = isFid();
   const grouped = {};
   annots.forEach(a => {
-    if (!grouped[a.paragraph_id]) grouped[a.paragraph_id] = [];
-    grouped[a.paragraph_id].push(a);
+    const key = a.anchor_mode === 'fidelity' ? a.pdf_page : a.paragraph_id;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(a);
   });
   const sortedPids = Object.keys(grouped).map(Number).sort((a, b) => a - b);
 
@@ -1347,10 +1536,19 @@ function renderAnnotationsOverview() {
           inner += '<div class="overview-annot-author" style="color:var(--' + nColor + ')">' + nAuthor + '</div>';
           inner += '<div class="overview-annot-text">' + esc(n.text || '') + '</div></div>';
         }
-        return `<div class="overview-item"><div class="overview-para">¶${pid}</div>${inner}</div>`;
+        const label = fid ? `p.${pid}` : `¶${pid}`;
+        const jump = fid ? ` onclick="jumpToFidPage(${pid})" style="cursor:pointer"` : '';
+        return `<div class="overview-item"><div class="overview-para"${jump}>${label}</div>${inner}</div>`;
       }).join('')
     }
   </div>`;
+}
+
+// overview / vocab / search 里点 p.N 回到阅读视图并跳页（fidelity）
+async function jumpToFidPage(page) {
+  state.view = 'reading';
+  if (page === state.currentPage) { render(); return; }   // goPage 同页会 early-return，得自己重绘
+  await goPage(page);
 }
 
 // ===== VOCAB PAGE =====
@@ -1371,7 +1569,8 @@ function renderVocabPage() {
           <div class="vocab-entry-body">
             <div class="vocab-word">${esc(v.word)}</div>
             ${v.note ? `<div class="vocab-note">${esc(v.note)}</div>` : ''}
-            ${v.paragraph_id ? `<div class="vocab-source" onclick="jumpToVocab(${v.paragraph_id})">¶${v.paragraph_id}</div>` : ''}
+            ${v.pdf_page ? `<div class="vocab-source" onclick="jumpToFidPage(${v.pdf_page})">p.${v.pdf_page}</div>`
+              : v.paragraph_id ? `<div class="vocab-source" onclick="jumpToVocab(${v.paragraph_id})">¶${v.paragraph_id}</div>` : ''}
           </div>
           <button class="vocab-edit" onclick="editVocab('${v.id}')">${SVG.pencil}</button>
           <button class="vocab-delete" onclick="deleteVocab('${v.id}')">${SVG.x}</button>
@@ -1480,6 +1679,13 @@ async function runSearch(query) {
 
     container.innerHTML = results.map(r => {
       const highlighted = esc(r.snippet).replace(re, '<mark>$1</mark>');
+      // fidelity 结果带 pdf_page（页锚），reflow 带 paragraph_id（段落锚）
+      if (r.pdf_page) {
+        return '<button class="search-result-item" onclick="closeSearch();jumpToFidPage(' + r.pdf_page + ')">'
+          + '<div class="search-result-pid">p.' + r.pdf_page + '</div>'
+          + '<div class="search-result-text">' + highlighted + '</div>'
+          + '</button>';
+      }
       return '<button class="search-result-item" onclick="jumpToSearch(' + r.paragraph_id + ')">'
         + '<div class="search-result-pid">¶' + r.paragraph_id + '</div>'
         + '<div class="search-result-text">' + highlighted + '</div>'

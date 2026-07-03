@@ -1769,3 +1769,157 @@ mark.hl-both:hover {
 .night-mode ::selection {
   background: rgba(200,134,74,0.25);
 }
+
+/* ===== FIDELITY MODE (PDF 原版) ===== */
+/* 三层：canvas 位图(z0) → 高亮 overlay(z1，不吃指针) → TextLayer(z2，透明可选中)。
+   overlay 点击走 JS hit-test，不靠 DOM 事件。 */
+.fid-folio { max-width: none; }
+.pdf-stage {
+  position: relative;
+  width: 100%;
+  min-height: 200px;
+  display: flex;
+  justify-content: center;
+}
+.pdf-page-wrap {
+  position: relative;
+  box-shadow: 0 1px 6px rgba(43,36,26,0.12), 0 6px 24px rgba(43,36,26,0.08);
+  background: #fff;
+}
+.pdf-page-wrap canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.night-mode .pdf-page-wrap { background: #1a1712; }
+.night-mode .pdf-page-wrap canvas {
+  filter: invert(0.88) hue-rotate(180deg) contrast(0.92);
+}
+
+/* 高亮 overlay：双色沿用 reflow 的 token；night mode 不 invert（token 自带夜色值） */
+.fid-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.fid-hl {
+  position: absolute;
+  border-radius: 1px;
+}
+.fid-hl.yinyin { background: var(--hl-yinyin-strong); }
+.fid-hl.kieran { background: var(--hl-kieran-strong); }
+.fid-hl.underline {
+  background: transparent;
+  border-bottom: 1.5px dashed var(--accent);
+  opacity: 0.75;
+}
+.fid-hl.underline.yinyin { border-bottom-color: var(--jade); }
+
+/* TextLayer（照抄 pdf.js v6 官方 pdf_viewer.css 的定位/缩放公式——
+   span 字号 = --font-height × --total-scale-factor，少一条选区坐标就会膨胀） */
+.textLayer {
+  color-scheme: only light;
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 2;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent {
+  display: contents;
+}
+.textLayer span[role="img"] {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+.textLayer ::selection {
+  background: rgba(168,90,26,0.28);
+  color: transparent;
+}
+.night-mode .textLayer ::selection {
+  background: rgba(200,134,74,0.35);
+  color: transparent;
+}
+
+.fid-loading {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.fid-loading.visible { opacity: 1; }
+
+/* 上传时的 reflow / fidelity 二选一 */
+.mode-pick {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.mode-pick:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.mode-pick-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink1);
+}
+.mode-pick-desc {
+  font-size: 11px;
+  color: var(--ink3);
+  margin-top: 2px;
+}
