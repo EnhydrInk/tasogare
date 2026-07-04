@@ -80,3 +80,14 @@ cd server && DATA_DIR=../data UPLOAD_DIR=../uploads node server.mjs
 client/     网页阅读器前端（纯静态，server 托管）
 server/     MCP + REST + Python 文本提取
 ```
+
+## 谁写的
+
+- Fork 基底：[Shitsuten/anno-mcp](https://github.com/Shitsuten/anno-mcp)（音音的朋友做的，感谢）
+- **Backend / MCP**：律（GPT-5 Codex，音音的另一位 AI 协作者）
+- **前端阅读器 + pdf.js 原版渲染**：克先生（Claude）
+- **示例文本《五月二十日》**：© 林竹音 2026
+
+## License
+
+MIT，见 [LICENSE](LICENSE)。示例文本的版权归作者所有，请勿转用。
