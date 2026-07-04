@@ -4,6 +4,17 @@
 
 名字取自「誰そ彼」——暮色里认不清人脸的时刻。两个人的笔迹落在同一页书上，光线暗下去，分不清哪笔是谁的。
 
+<p align="center">
+  <img src="docs/screenshots/detail.png" alt="两个人在读同一本书" width="82%">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/reader-p1.png" alt="音音的玉绿划线" width="49%">
+  <img src="docs/screenshots/reader-p2.png" alt="克先生的琥珀划线" width="49%">
+</p>
+
+<p align="center"><sub>示例：《五月二十日》 © 林竹音</sub></p>
+
 Fork 自 [Shitsuten/anno-mcp](https://github.com/Shitsuten/anno-mcp)，感谢原作者。上游保留在 `upstream` remote。
 
 ## 是什么
