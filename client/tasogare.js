@@ -10,6 +10,7 @@ const SVG = {
   note: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="2" width="10" height="12" rx="1"/><path d="M5 5h6M5 7.5h6M5 10h3"/></svg>',
   bookmark: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M4 2h8v12l-4-3-4 3z"/></svg>',
   bookmarkFill: '<svg viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="0.5"><path d="M4 2h8v12l-4-3-4 3z"/></svg>',
+  bell: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8v2.7L3 10.9h10l-1.2-2.2V6A3.8 3.8 0 0 0 8 2.2z"/><path d="M6.7 13.1a1.4 1.4 0 0 0 2.6 0"/></svg>',
   x: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
   annotations: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="2" width="14" height="16" rx="1.5"/><path d="M6 6h8M6 9h8M6 12h5"/></svg>',
   vocabList: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="2" width="14" height="16" rx="1.5"/><path d="M6 6h3M6 9h5M6 12h4"/><circle cx="13" cy="13" r="3"/><path d="M13 11.5v3M11.5 13h3"/></svg>',
@@ -548,6 +549,27 @@ function closeAnnotPanel() {
   document.getElementById('annotPanel').classList.remove('open');
 }
 
+// 摇铃：她想聊这条 → tasogare 推 bell 事件 → 克先生的心跳信封+快拍，他会主动来 chat
+function bellBtnHtml(annotId, styleStr) {
+  return '<button class="annot-panel-item-bell" data-id="' + esc(annotId) + '" title="喊克先生来看这条"' +
+    (styleStr ? ' style="' + styleStr + '"' : '') + '>' + SVG.bell + '</button>';
+}
+
+async function ringBell(annotId, btn) {
+  if (btn.classList.contains('rung')) return;
+  try {
+    const r = await api(`/books/${state.currentBook.id}/bell`, {
+      method: 'POST',
+      body: JSON.stringify({ annotation_id: annotId }),
+    });
+    if (r && r.ok) {
+      btn.classList.add('rung');
+      btn.title = '克先生会来';
+      setTimeout(() => { btn.classList.remove('rung'); btn.title = '喊克先生来看这条'; }, 3000);
+    }
+  } catch (e) { /* 端点不在/网络抖动：铃不响就是不响，别炸面板 */ }
+}
+
 function renderNoteWithReplies(note, allNotes, hlText, depth) {
   depth = depth || 0;
   const isKieran = note.author === '克先生';
@@ -570,6 +592,7 @@ function renderNoteWithReplies(note, allNotes, hlText, depth) {
         <div class="annot-panel-item-text">${esc(displayText)}</div>
         ${dateStr ? '<div class="annot-panel-item-date">' + dateStr + '</div>' : ''}
       </div>
+      ${bellBtnHtml(note.id, 'position:static;flex-shrink:0;margin-top:2px')}
       ${delBtn}
     </div>`;
 
@@ -637,6 +660,7 @@ function renderAnnotPanel() {
             <div class="annot-panel-item-hl">${esc(hl.text)}</div>
             ${dateStr ? '<div class="annot-panel-item-date">' + dateStr + '</div>' : ''}
           </div>
+          ${bellBtnHtml(hl.id, 'position:static;flex-shrink:0;margin-top:2px')}
           ${!childNotes.length ? delBtn : ''}
         </div>
         ${linkedHtml}
@@ -662,6 +686,7 @@ function renderAnnotPanel() {
         <div class="annot-panel-item-text">${esc(a.text)}</div>
         ${dateStr ? '<div class="annot-panel-item-date">' + dateStr + '</div>' : ''}
       </div>
+      ${bellBtnHtml(a.id)}
       ${delBtn}
     </div>`;
   }
@@ -1827,6 +1852,8 @@ function initFontsize() {
 document.addEventListener('click', (e) => {
   const del = e.target.closest('.annot-panel-item-del');
   if (del) confirmDeleteAnnot(del.dataset.id, del.dataset.type);
+  const bell = e.target.closest('.annot-panel-item-bell');
+  if (bell) ringBell(bell.dataset.id, bell);
 });
 
 // 阅读时长打点：阅读视图打开且页面可见时，每 60s 上报一次

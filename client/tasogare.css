@@ -1001,6 +1001,11 @@ mark.hl-both:hover {
 .annot-panel-item { position: relative; }
 .annot-panel-item-del { position: absolute; top: 8px; right: 8px; background: none; border: none; color: var(--ink4); font-size: 16px; cursor: pointer; padding: 0 4px; line-height: 1; opacity: 0.5; transition: opacity 0.2s, color 0.2s; }
 .annot-panel-item-del:hover { opacity: 1; color: var(--vermillion); }
+.annot-panel-item-bell { position: absolute; top: 8px; right: 30px; background: none; border: none; color: var(--ink4); cursor: pointer; padding: 0 3px; line-height: 1; opacity: 0.5; transition: opacity 0.2s, color 0.2s; }
+.annot-panel-item-bell svg { width: 13px; height: 13px; display: block; }
+.annot-panel-item-bell:hover { opacity: 1; color: var(--accent); }
+.annot-panel-item-bell.rung { opacity: 1; color: var(--accent); animation: bell-swing 0.5s ease; }
+@keyframes bell-swing { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(14deg); } 55% { transform: rotate(-10deg); } 80% { transform: rotate(5deg); } }
 .annot-panel-empty {
   font-family: var(--font-mono);
   font-size: 9px;
