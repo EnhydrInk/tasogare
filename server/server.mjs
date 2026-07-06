@@ -63,6 +63,44 @@ function jstDay(iso) {
   return iso ? new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : null;
 }
 
+function jstHourMinute(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const hour = parts.find(p => p.type === "hour")?.value || "00";
+  const minute = parts.find(p => p.type === "minute")?.value || "00";
+  return `${hour}:${minute}`;
+}
+
+function jstMonthDay(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo", month: "numeric", day: "numeric",
+  }).formatToParts(date);
+  const month = Number(parts.find(p => p.type === "month")?.value || 0);
+  const day = Number(parts.find(p => p.type === "day")?.value || 0);
+  return `${month}月${day}日`;
+}
+
+function activityTimeLabel(iso, now = new Date()) {
+  if (!iso) return "";
+  const created = new Date(iso);
+  const createdMs = created.getTime();
+  if (!Number.isFinite(createdMs)) return "";
+  const diffMs = Math.max(0, now.getTime() - createdMs);
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 5) return "（刚刚）";
+  if (minutes < 60) return `（${minutes}分钟前）`;
+  const hours = Math.floor(diffMs / 3600000);
+  if (hours < 24) return `（${hours}小时前）`;
+
+  const createdDay = jstDay(iso);
+  const yesterdayDay = jstDay(new Date(now.getTime() - 24 * 3600 * 1000).toISOString());
+  if (createdDay === yesterdayDay) {
+    return `（昨天 ${jstHourMinute(created)}）`;
+  }
+  return `（${jstMonthDay(created)}）`;
+}
+
 // --- Data helpers ---
 function bookPath(id) { return `${DATA_DIR}/${id}.json`; }
 function pdfPath(id) { return resolve(DATA_DIR, "pdfs", `${id}.pdf`); }
@@ -570,6 +608,7 @@ function createMcp() {
     author: z.string().optional().describe("筛选作者: 音音 或 克先生"),
   }, async ({ hours, author }) => {
     const cutoff = Date.now() - (hours || 24) * 3600 * 1000;
+    const now = new Date();
     const sections = [];
     for (const meta of listBooks()) {
       const book = loadBook(meta.id);
@@ -580,21 +619,22 @@ function createMcp() {
       if (!annots.length && !vocab.length) continue;
       const lines = [`《${book.title}》(ID: ${book.id})`];
       for (const a of annots) {
+        const age = activityTimeLabel(a.created_at, now);
         if (annotationMode(a) === "fidelity") {
           const label = `[p.${a.pdf_page}]`;
           if (a.type === "highlight") {
-            lines.push(`  📌 ${a.author} 划线 ${label}:「${a.quote || a.text}」`);
+            lines.push(`  📌 ${a.author} 划线 ${label}:「${a.quote || a.text}」${age}`);
           } else {
-            lines.push(`  💬 ${a.author} 批注 ${label}: ${a.text}${a.quote ? `\n     原文: ${a.quote}` : ""}`);
+            lines.push(`  💬 ${a.author} 批注 ${label}: ${a.text}${age}${a.quote ? `\n     原文: ${a.quote}` : ""}`);
           }
         } else if (a.type === "highlight") {
-          lines.push(`  📌 ${a.author} 划线 [§${a.paragraph_id}]:「${a.text}」`);
+          lines.push(`  📌 ${a.author} 划线 [§${a.paragraph_id}]:「${a.text}」${age}`);
         } else {
           const para = (book.paragraphs || []).find(p => p.id === a.paragraph_id);
-          lines.push(`  💬 ${a.author} 批注 [§${a.paragraph_id}]: ${a.text}${para ? `\n     原文: ${para.text.slice(0, 100)}` : ""}`);
+          lines.push(`  💬 ${a.author} 批注 [§${a.paragraph_id}]: ${a.text}${age}${para ? `\n     原文: ${para.text.slice(0, 100)}` : ""}`);
         }
       }
-      for (const v of vocab) lines.push(`  📖 生词「${v.word}」${v.note ? ` — ${v.note}` : ""}`);
+      for (const v of vocab) lines.push(`  📖 生词「${v.word}」${v.note ? ` — ${v.note}` : ""}${activityTimeLabel(v.created_at, now)}`);
       sections.push(lines.join("\n"));
     }
     if (!sections.length) return { content: [{ type: "text", text: "这段时间没有新动态。" }] };
@@ -979,6 +1019,28 @@ app.post("/api/books/:id/annotations", async (req, res) => {
     });
     res.status(result.status).json(result.body);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/books/:id/bell", (req, res) => {
+  const book = loadBook(req.params.id);
+  if (!book) return res.status(404).json({ error: "Not found" });
+  const { annotation_id } = req.body || {};
+  if (!annotation_id) return res.status(400).json({ error: "Missing annotation_id" });
+  const annotation = (book.annotations || []).find(a => a.id === annotation_id);
+  if (!annotation) return res.status(404).json({ error: "Annotation not found" });
+
+  const payload = {
+    type: "bell",
+    author: "音音",
+    book_id: book.id,
+    book_title: book.title,
+    text: `${annotation.author}的${annotation.type === "highlight" ? "划线" : "批注"}「${(annotation.quote || annotation.text || "").slice(0, 150)}」`,
+  };
+  if (annotationMode(annotation) === "fidelity") payload.pdf_page = annotation.pdf_page;
+  else payload.paragraph_id = annotation.paragraph_id;
+
+  pushEvent(payload);
+  return res.json({ ok: true });
 });
 
 app.post("/api/books/:id/reading-ping", async (req, res) => {
