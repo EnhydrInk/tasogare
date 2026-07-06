@@ -145,9 +145,10 @@ async function openBook(id) {
   const book = await api('/books/' + id);
   state.currentBook = book;
   if (book.mode === 'fidelity') {
-    // fidelity：bookmark 是段落语义，不适用；进度就是 PDF 页
-    state.currentPage = Math.max(1, book.progress?.page || 1);
-    state.bookmark = null;
+    // fidelity：书签/进度都是 PDF 页语义；有书签优先跳书签页（同 reflow 行为）
+    const bmData = await api('/books/' + id + '/bookmarks');
+    state.bookmark = bmData?.bookmark || null;
+    state.currentPage = Math.max(1, state.bookmark || book.progress?.page || 1);
     state.paragraphs = [];
     state.toc = [];
     state.annotations = (await api('/books/' + id + '/annotations')) || [];
@@ -237,9 +238,11 @@ async function deleteAnnotation(annotId) {
 }
 
 async function toggleBookmark(paraId) {
+  // fidelity 书签值是 PDF 页码，字段分流，不复用 paragraph_id 装两种语义
+  const body = isFid() ? { pdf_page: paraId } : { paragraph_id: paraId };
   const result = await api(`/books/${state.currentBook.id}/bookmarks`, {
     method: 'POST',
-    body: JSON.stringify({ paragraph_id: paraId }),
+    body: JSON.stringify(body),
   });
   state.bookmark = result.action === 'set' ? paraId : null;
   render();
@@ -1310,8 +1313,9 @@ function renderReading() {
 }
 
 // fidelity 版阅读视图：pdf.js 三层（canvas / 高亮 overlay / TextLayer）。
-// TOC / 字号 / 书签是重排语义，fidelity 不出；Notes / Vocab / slider 照旧。
+// TOC / 字号是重排语义，fidelity 不出；书签按 PDF 页；Notes / Vocab / slider 照旧。
 function renderReadingFidelity(b, pct) {
+  const isBookmarked = isCurrentPageBookmarked();
   return `
   <div class="reader-topbar">
     <div class="reader-topbar-left">
@@ -1363,16 +1367,27 @@ function renderReadingFidelity(b, pct) {
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3 5.5 5.5 0 1 0 13 9.5z"/></svg>
         <span class="bottombar-btn-label">Night</span>
       </button>
+      <button class="bottombar-btn ${isBookmarked ? 'active' : ''}" onclick="toggleCurrentPageBookmark()" title="Bookmark">
+        ${isBookmarked ? SVG.bookmarkFill : SVG.bookmark}
+        <span class="bottombar-btn-label">Mark</span>
+      </button>
     </div>
   </div>`;
 }
 
 function isCurrentPageBookmarked() {
-  if (!state.bookmark || !state.paragraphs || state.paragraphs.length === 0) return false;
+  if (!state.bookmark) return false;
+  if (isFid()) return state.bookmark === state.currentPage;
+  if (!state.paragraphs || state.paragraphs.length === 0) return false;
   return state.paragraphs.some(p => p.id === state.bookmark);
 }
 
 async function toggleCurrentPageBookmark() {
+  if (isFid()) {
+    // fidelity：书签夹当前 PDF 页；backend toggle 同值取下、异值覆盖，一次请求完成移动
+    await toggleBookmark(state.currentPage);
+    return;
+  }
   if (!state.paragraphs || state.paragraphs.length === 0) return;
   // Find the last visible paragraph (furthest reading position)
   const lastPid = state.paragraphs[state.paragraphs.length - 1].id;
