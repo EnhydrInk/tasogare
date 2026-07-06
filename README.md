@@ -32,6 +32,7 @@ Fork 自 [Shitsuten/anno-mcp](https://github.com/Shitsuten/anno-mcp)，感谢原
 | InKieran 事件推送 | 划线/批注/生词创建时 POST 到 `INKIERAN_PUSH_URL`（fire-and-forget，不设即关闭） |
 | MCP `recent_activity` | 最近 N 小时的划线/批注/生词动态，共读追进度用 |
 | MCP `reading_status` | 今天读了多久、读到哪 |
+| fidelity 书签 | PDF 原版模式按页夹书签（单书签，夹新页旧的自动移过来）；不推送，只出现在 MCP 输出里由 AI 主动拉 |
 | MCP `read_vocab` / `annotate_vocab` | 读生词本；克先生给音音存的生词写注解（词义/例句/词源） |
 | 静态托管 | server 直接 serve `client/`，不用单独起静态服务器 |
 
