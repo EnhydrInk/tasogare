@@ -234,6 +234,11 @@ function getPageForParagraph(book, paraId) {
   return 1;
 }
 
+function formatBookmark(book, { fidelityPrefix = "p.", reflowPrefix = "§" } = {}) {
+  if (!book?.bookmark) return null;
+  return `${isFidelityBook(book) ? fidelityPrefix : reflowPrefix}${book.bookmark}`;
+}
+
 function listBooks() {
   if (!existsSync(DATA_DIR)) return [];
   return readdirSync(DATA_DIR)
@@ -309,9 +314,11 @@ function createMcp() {
   server.tool("list_books", "书架列表", {}, async () => {
     const books = listBooks();
     if (books.length === 0) return { content: [{ type: "text", text: "书架空空如也。" }] };
-    const text = books.map(b =>
-      `📖 ${b.title} (${b.paragraph_count}段, ${b.page_count}页)\n   ID: ${b.id}\n   批注: ${b.annotation_count} | 书签: ${b.has_bookmark ? "§"+b.bookmark : "无"}\n   进度: ${b.progress ? `第${b.progress.page}页` : "未开始"}`
-    ).join("\n\n");
+    const text = books.map(b => {
+      const book = loadBook(b.id);
+      const bookmark = formatBookmark(book);
+      return `📖 ${b.title} (${b.paragraph_count}段, ${b.page_count}页)\n   ID: ${b.id}\n   批注: ${b.annotation_count} | 书签: ${bookmark || "无"}\n   进度: ${b.progress ? `第${b.progress.page}页` : "未开始"}`;
+    }).join("\n\n");
     return { content: [{ type: "text", text }] };
   });
 
@@ -513,7 +520,11 @@ function createMcp() {
     const totalPages = getTotalPages(book);
     const p = book.progress || { page: 0 };
     const pct = totalPages > 0 ? Math.round((p.page / totalPages) * 100) : 0;
-    return { content: [{ type: "text", text: `《${book.title}》阅读进度：第${p.page}/${totalPages}页 (${pct}%)` }] };
+    const bookmark = formatBookmark(book, { fidelityPrefix: "第", reflowPrefix: "§" });
+    const bookmarkText = bookmark
+      ? (isFidelityBook(book) ? `\n书签夹在${bookmark}页` : `\n书签在 ${bookmark}`)
+      : "";
+    return { content: [{ type: "text", text: `《${book.title}》阅读进度：第${p.page}/${totalPages}页 (${pct}%)${bookmarkText}` }] };
   });
 
 
@@ -594,10 +605,14 @@ function createMcp() {
     const st = readingStatus();
     if (!st.books.length) return { content: [{ type: "text", text: `今天（${st.date}）还没翻书。` }] };
     const mins = Math.round(st.total_seconds / 60);
-    const lines = st.books.map(b =>
-      `《${b.title}》 ${Math.round(b.seconds / 60)}分钟 · 第${b.page}/${b.total_pages}页` +
-      (b.annotations_today ? ` · 批注/划线+${b.annotations_today}` : "") +
-      (b.vocab_today ? ` · 生词+${b.vocab_today}` : ""));
+    const lines = st.books.map(b => {
+      const book = loadBook(b.id);
+      const bookmark = formatBookmark(book);
+      return `《${b.title}》 ${Math.round(b.seconds / 60)}分钟 · 第${b.page}/${b.total_pages}页` +
+        (b.annotations_today ? ` · 批注/划线+${b.annotations_today}` : "") +
+        (b.vocab_today ? ` · 生词+${b.vocab_today}` : "") +
+        (bookmark ? ` · 书签 ${bookmark}` : "");
+    });
     return { content: [{ type: "text", text: `今天（${st.date}）共读书 ${mins} 分钟\n` + lines.join("\n") }] };
   });
 
@@ -650,7 +665,7 @@ function makeBook(id, title, filename, paragraphs) {
   const pages = computePages(paragraphs);
   return {
     id, title, filename, mode: "reflow", created_at: new Date().toISOString(),
-    paragraphs, pages, annotations: [], bookmarks: [],
+    paragraphs, pages, annotations: [],
     progress: { page: 1, updated_at: new Date().toISOString() },
   };
 }
@@ -665,7 +680,6 @@ function makeFidelityBook(id, title, filename, pageTexts) {
     pdf_path: `pdfs/${id}.pdf`,
     words_path: `words/${id}.json`,
     annotations: [],
-    bookmarks: [],
     progress: { page: 1, updated_at: new Date().toISOString() },
   };
 }
@@ -1006,6 +1020,24 @@ app.post("/api/books/:id/bookmarks", async (req, res) => {
     const result = await withFileLock(bookPath(req.params.id), async () => {
       const book = loadBook(req.params.id);
       if (!book) return { status: 404, body: { error: "Not found" } };
+      if (isFidelityBook(book)) {
+        const rawPdfPage = req.body.pdf_page;
+        const pdf_page = (typeof rawPdfPage === "number" || typeof rawPdfPage === "string")
+          ? Number(rawPdfPage)
+          : NaN;
+        const pageCount = getFidelityPageCount(book);
+        if (!Number.isInteger(pdf_page) || pdf_page < 1 || pdf_page > pageCount) {
+          return { status: 400, body: { error: `pdf_page must be an integer between 1 and ${pageCount}` } };
+        }
+        if (book.bookmark === pdf_page) {
+          book.bookmark = null;
+          saveBook(book);
+          return { status: 200, body: { action: "removed", pdf_page } };
+        }
+        book.bookmark = pdf_page;
+        saveBook(book);
+        return { status: 200, body: { action: "set", pdf_page } };
+      }
       const { paragraph_id } = req.body;
       if (book.bookmark === paragraph_id) {
         book.bookmark = null;
@@ -1024,6 +1056,9 @@ app.get("/api/books/:id/bookmarks", (req, res) => {
   const book = loadBook(req.params.id);
   if (!book) return res.status(404).json({ error: "Not found" });
   if (book.bookmark) {
+    if (isFidelityBook(book)) {
+      return res.json({ bookmark: book.bookmark, page: book.bookmark });
+    }
     const page = getPageForParagraph(book, book.bookmark);
     return res.json({ bookmark: book.bookmark, page });
   }
