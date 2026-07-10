@@ -51,7 +51,10 @@ function pushEvent(event) {
   if (INKIERAN_PUSH_TOKEN) headers.Authorization = `Bearer ${INKIERAN_PUSH_TOKEN}`;
   fetch(INKIERAN_PUSH_URL, {
     method: "POST", headers,
-    body: JSON.stringify({ source: "tasogare", at: new Date().toISOString(), ...event }),
+    // event_id = backend 侧幂等键（2026-07-10 起 inkieran 按它去重）——
+    // 现在是 fire-and-forget 用不上，将来加重试时天然防重复落表
+    body: JSON.stringify({ source: "tasogare", at: new Date().toISOString(),
+                           event_id: crypto.randomUUID(), ...event }),
     signal: AbortSignal.timeout(3000),
   }).catch(() => {});
 }
