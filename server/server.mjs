@@ -1413,8 +1413,39 @@ app.post("/mcp/sse", async (req, res) => {
 
 app.get("/mcp/sse", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"];
-  if (sessionId && transports[sessionId] && transports[sessionId].transport instanceof StreamableHTTPServerTransport) {
-    await transports[sessionId].transport.handleRequest(req, res, req.body);
+  // 带 mcp-session-id 的 GET 一定来自 streamable-http 客户端；legacy SSE 客户端
+  // （claude.ai）建流时不带这个头，它的 session 走 /mcp/messages?sessionId=。
+  // 所以只要带了头就不能落到下面的 legacy 分支——服务重启后客户端会拿着旧
+  // session id 再来 GET，认不出来就凭空给它建一条 legacy SSE 流，那条同样没有
+  // 数据可发，300s 后照样超时，循环原样继续（2026-08-17 06:23:21 实录）。
+  if (sessionId && !(transports[sessionId]?.transport instanceof StreamableHTTPServerTransport)) {
+    // 认不出这个 session（服务重启过 / 已过期）→ 按规范回 404，客户端会重新 initialize
+    res.status(404).json({
+      jsonrpc: "2.0",
+      error: { code: -32001, message: "Session not found" },
+      id: null,
+    });
+    return;
+  }
+  if (sessionId) {
+    // streamable-http 的 standalone SSE 流是给「服务端主动推给客户端」用的，
+    // 而我们一条都不推：十个 tool 全是请求-响应，pushEvent 是出站 webhook
+    // 走 fetch 直连 inkieran backend，不经这条流。
+    //
+    // 以前这里直接交给 SDK 开流，于是流上永远没有数据可发。客户端
+    // （Claude Code 的 undici）bodyTimeout 默认 300s、量的是「两次数据之间」
+    // 的间隔，所以每 5 分钟准时把它判超时再重连一次——2026-08-16 22:05 到
+    // 08-17 06:00 空转了 96 次，每次都在客户端刷一串 TimeoutError。
+    // 功能一直是好的（工具调用走 POST，重连也每次都成功），纯噪音。
+    //
+    // MCP 规范对这种服务端的规定就是回 405，客户端收到就不再来建这条流。
+    // ⚠️ 将来 tasogare 真要做服务端主动推送（共读时主动出声之类），
+    // 这里得改回 handleRequest，并且给那条流加心跳——否则照样被 300s 掐断。
+    res.status(405).set("Allow", "POST").json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method Not Allowed: this endpoint does not offer an SSE stream" },
+      id: null,
+    });
     return;
   }
   const mcpServer = createMcp();
