@@ -11,5 +11,8 @@
   },
   "scripts": {
     "dev": "DATA_DIR=../data UPLOAD_DIR=../uploads node server.mjs"
+  },
+  "overrides": {
+    "ip-address": "10.3.1"
   }
 }
