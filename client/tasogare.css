@@ -1975,3 +1975,65 @@ mark.hl-both:hover {
   color: var(--ink3);
   margin-top: 2px;
 }
+
+/* ===== MARGIN NOTES（页边的字）===== */
+.margin-notes {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.margin-note {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: calc(var(--reader-font-size) * 0.8);
+  line-height: 1.55;
+  color: var(--ink3);
+  padding: 1px 0 1px 10px;
+  border-left: 1.5px solid var(--border-strong);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.margin-note.kieran { border-left-color: var(--accent); }
+.margin-note.jade { border-left-color: var(--jade); }
+.margin-note.reply { margin-left: 14px; }
+.margin-note-author {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  margin-right: 7px;
+  vertical-align: 1px;
+}
+.margin-note.kieran .margin-note-author { color: var(--accent); }
+.margin-note.jade .margin-note-author { color: var(--jade); }
+.margin-note:hover { color: var(--ink1); }
+
+/* 宽屏：字真的写在右侧页边 */
+@media (min-width: 1180px) {
+  .margin-notes {
+    position: absolute;
+    left: 100%;
+    top: 22px;
+    width: 230px;
+    margin: 0 0 0 30px;
+  }
+}
+
+/* 新长出来的字：墨渗进纸里 */
+@keyframes ink-in {
+  0%   { opacity: 0; transform: translateY(6px); filter: blur(2px); }
+  60%  { filter: blur(0); }
+  100% { opacity: 1; transform: none; }
+}
+.margin-note.ink-in, mark.hl.ink-in {
+  animation: ink-in 0.9s var(--ease) both;
+}
+@keyframes margin-wake {
+  0%   { background: transparent; }
+  25%  { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+.paragraph.margin-wake { animation: margin-wake 1.8s var(--ease) 1; }

@@ -18,6 +18,15 @@ const SVG = {
   pencil: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M11.5 2.5l2 2L5 13H3v-2l8.5-8.5z"/></svg>',
 };
 
+// 克先生在页面上的显示名：?kieran=Claude 可临时改（展示用），记进 localStorage；数据里的 author 永远是「克先生」
+const KIERAN_LABEL = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get('kieran');
+    if (q) localStorage.setItem('tasogare-kieran-label', q);
+    return localStorage.getItem('tasogare-kieran-label') || '克先生';
+  } catch (_) { return '克先生'; }
+})();
+
 let state = {
   view: 'shelf',
   books: [],
@@ -574,7 +583,7 @@ function renderNoteWithReplies(note, allNotes, hlText, depth) {
   depth = depth || 0;
   const isKieran = note.author === '克先生';
   const color = isKieran ? 'amber' : 'jade';
-  const author = isKieran ? '克先生' : '音音';
+  const author = isKieran ? KIERAN_LABEL : '音音';
   const dateStr = note.created_at ? note.created_at.substring(0, 10) : '';
   const canDelete = !isKieran;
   const delBtn = canDelete
@@ -635,7 +644,7 @@ function renderAnnotPanel() {
   for (const hl of highlights) {
     const isKieran = hl.author === '克先生';
     const colorClass = isKieran ? 'amber' : 'jade';
-    const authorName = isKieran ? '克先生' : '音音';
+    const authorName = isKieran ? KIERAN_LABEL : '音音';
     const dateStr = hl.created_at ? hl.created_at.substring(0, 10) : '';
     const canDelete = !isKieran;
     const delBtn = canDelete
@@ -672,7 +681,7 @@ function renderAnnotPanel() {
   for (const a of standaloneNotes) {
     const isKieran = a.author === '克先生';
     const colorClass = isKieran ? 'amber' : 'jade';
-    const authorName = isKieran ? '克先生' : '音音';
+    const authorName = isKieran ? KIERAN_LABEL : '音音';
     const dateStr = a.created_at ? a.created_at.substring(0, 10) : '';
     const canDelete = !isKieran;
     const delBtn = canDelete
@@ -1129,7 +1138,7 @@ function renderDetail() {
       ${hasKieranProgress ? `
       <div class="progress-row" style="margin-top:12px">
         <div class="progress-row-header">
-          <span class="progress-label">克先生</span>
+          <span class="progress-label">${KIERAN_LABEL}</span>
           <span class="progress-pct amber">~${kieranPct}%</span>
         </div>
         <div class="bar-gauge"><div class="bar-gauge-fill amber" style="width:${kieranPct}%"></div></div>
@@ -1195,7 +1204,7 @@ function renderDetailGrouped(items) {
   for (const hl of highlights) {
     const isKieran = hl.author === '克先生';
     const colorVar = isKieran ? 'accent' : 'jade';
-    const authorName = isKieran ? '克先生' : '音音';
+    const authorName = isKieran ? KIERAN_LABEL : '音音';
     const dateStr = hl.created_at ? hl.created_at.substring(0, 10) : '';
     const children = linkedNotes[hl.id] || [];
     const directChildren = children.filter(n => !children.some(p => p.id === n.reply_to));
@@ -1232,7 +1241,7 @@ function renderDetailReply(note, allNotes, hlText, depth) {
 
   let html = `<div style="border-top:0.5px solid var(--border-soft);padding:4px 0;${indent}">
     <div class="annot-row-header" style="margin-bottom:2px">
-      <span class="annot-row-author ${authorClass}">${replyIcon}${isKieran?'克先生':'音音'}</span>
+      <span class="annot-row-author ${authorClass}">${replyIcon}${isKieran ? KIERAN_LABEL : '音音'}</span>
       ${dateStr ? '<span class="annot-row-date">' + dateStr + '</span>' : ''}
     </div>
     <div class="annot-row-note">${esc(displayText)}</div>
@@ -1246,7 +1255,7 @@ function renderDetailReply(note, allNotes, hlText, depth) {
 function renderDetailAnnot(a, isLinked, parentHlText) {
   const isKieran = a.author === '克先生';
   const colorVar = isKieran ? 'accent' : 'jade';
-  const authorName = isKieran ? '克先生' : '音音';
+  const authorName = isKieran ? KIERAN_LABEL : '音音';
   const dateStr = a.created_at ? a.created_at.substring(0, 10) : '';
 
   let bodyHtml = '';
@@ -1444,7 +1453,32 @@ function renderParagraphs() {
     </div>`;
   }
 
-  return state.paragraphs.map(p => {
+  return state.paragraphs.map(renderParagraph).join('');
+}
+
+// 页边的字：这一段下面（宽屏时在右侧页边）直接长出两个人的批注，不用点开面板才看得见。
+function renderMarginNotes(pid) {
+  const annots = state.annotations || [];
+  const notes = annots.filter(a => a.paragraph_id === pid && a.type === 'note' && (a.text || '').trim());
+  if (notes.length === 0) return '';
+  const byId = new Map(annots.map(a => [a.id, a]));
+  const sorted = [...notes].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  const renderOne = (n, depth) => {
+    const isKieran = n.author === '克先生';
+    const hl = n.highlight_id ? byId.get(n.highlight_id) : null;
+    const text = hl && hl.text ? cleanNoteText(n.text, hl.text) : n.text;
+    const replies = sorted.filter(r => r.reply_to === n.id);
+    return `<div class="margin-note ${isKieran ? 'kieran' : 'jade'}${depth ? ' reply' : ''}" data-aid="${esc(n.id)}" onclick="openAnnotPanel(${pid}, null, '${esc(n.id)}')">` +
+      `<span class="margin-note-author">${isKieran ? KIERAN_LABEL : '音音'}</span>` +
+      `<span class="margin-note-text">${esc(text)}</span></div>` +
+      replies.map(r => renderOne(r, depth + 1)).join('');
+  };
+  const roots = sorted.filter(n => !n.reply_to || !byId.has(n.reply_to));
+  return `<div class="margin-notes">${roots.map(n => renderOne(n, 0)).join('')}</div>`;
+}
+
+function renderParagraph(p) {
+  {
     const pid = p.id;
     const isBookmarked = state.bookmark === pid;
 
@@ -1481,9 +1515,68 @@ function renderParagraphs() {
     <div class="${classes.join(' ')}" data-pid="${pid}">
       <span class="para-id">¶${pid}</span>
       <div class="para-text">${textHtml}</div>
+      ${renderMarginNotes(pid)}
     </div>`;
-  }).join('');
+  }
 }
+
+// ===== LIVE MARGIN =====
+// 阅读视图里每 3s 拉一次批注；有变化就只重画变了的段落，新长出来的字动一下。
+// 不整页 render()：不打断选区、不跳滚动、不关面板。fidelity 页由 pdf.js 画，这轮不碰。
+const LIVE_MARGIN_MS = 3000;
+let liveMarginBusy = false;
+function annotKey(a) { return `${a.id}:${a.type}:${a.author}:${(a.text || '').length}:${a.reply_to || ''}`; }
+
+function repaintParagraph(pid, newIds) {
+  const el = document.querySelector(`.paragraph[data-pid="${pid}"]`);
+  const p = (state.paragraphs || []).find(x => x.id === pid);
+  if (!el || !p) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = renderParagraph(p);
+  const fresh = tmp.firstElementChild;
+  el.replaceWith(fresh);
+  let i = 0;
+  fresh.querySelectorAll('.margin-note[data-aid], mark.hl[data-annot-ids]').forEach(node => {
+    const ids = node.dataset.aid ? [node.dataset.aid] : (node.dataset.annotIds || '').split(',');
+    if (ids.some(id => newIds.has(id))) {
+      node.classList.add('ink-in');
+      node.style.animationDelay = `${i++ * 140}ms`;
+    }
+  });
+  if (i > 0) {
+    fresh.classList.add('margin-wake');
+    setTimeout(() => fresh.classList.remove('margin-wake'), 1800);
+  }
+}
+
+async function liveMarginTick() {
+  if (state.view !== 'reading' || !state.currentBook || state.loading) return;
+  if (document.visibilityState !== 'visible' || isFid() || liveMarginBusy) return;
+  const sel = window.getSelection ? window.getSelection() : null;
+  if (sel && !sel.isCollapsed) return; // 她正在选字，别动 DOM
+  liveMarginBusy = true;
+  try {
+    const bookId = state.currentBook.id;
+    const fresh = await api(`/books/${bookId}/annotations`);
+    if (!Array.isArray(fresh) || state.view !== 'reading' || state.currentBook?.id !== bookId) return;
+    const oldKeys = new Set(state.annotations.map(annotKey));
+    const newKeys = new Set(fresh.map(annotKey));
+    const added = fresh.filter(a => !oldKeys.has(annotKey(a)));
+    const removed = state.annotations.filter(a => !newKeys.has(annotKey(a)));
+    if (added.length === 0 && removed.length === 0) return;
+    state.annotations = fresh;
+    const touched = new Set([...added, ...removed].map(a => a.paragraph_id).filter(Boolean));
+    const newIds = new Set(added.map(a => a.id));
+    for (const pid of touched) repaintParagraph(pid, newIds);
+    const panel = document.getElementById('annotPanel');
+    if (panel && panel.classList.contains('open') && state.panelParaId && touched.has(state.panelParaId)) renderAnnotPanel();
+  } catch (_) {
+    // 会场网抖一下就算了，下一拍再来
+  } finally {
+    liveMarginBusy = false;
+  }
+}
+setInterval(liveMarginTick, LIVE_MARGIN_MS);
 
 // ===== ANNOTATIONS OVERVIEW =====
 function renderAnnotationsOverview() {
@@ -1525,7 +1618,7 @@ function renderAnnotationsOverview() {
       ${filterBtn('Highlights', 'highlight')}
       ${filterBtn('Notes', 'note')}
       ${filterBtn('音音', 'yinyin')}
-      ${filterBtn('克先生', 'kieran')}
+      ${filterBtn(KIERAN_LABEL, 'kieran')}
     </div>
     ${sortedPids.length === 0
       ? `<div class="empty-state"><div class="empty-glyph">§</div><div class="empty-text">no annotations</div></div>`
@@ -1548,7 +1641,7 @@ function renderAnnotationsOverview() {
         for (const hl of highlights) {
           const isKieran = hl.author === '克先生';
           const colorVar = isKieran ? 'accent' : 'jade';
-          const authorName = isKieran ? '克先生' : '音音';
+          const authorName = isKieran ? KIERAN_LABEL : '音音';
           const children = linkedMap[hl.id] || [];
           const directChildren = children.filter(n => !children.some(p => p.id === n.reply_to));
           let notesHtml = '';
@@ -1557,12 +1650,12 @@ function renderAnnotationsOverview() {
             const cleaned = cleanNoteText(n.text || '', hl.text || '');
             const replies = items.filter(r => r.reply_to === n.id);
             notesHtml += '<div style="border-top:0.5px solid var(--border-soft);padding:4px 0">';
-            notesHtml += '<div class="overview-annot-author" style="color:var(--' + (nKieran?'accent':'jade') + ')">' + (nKieran?'克先生':'音音') + '</div>';
+            notesHtml += '<div class="overview-annot-author" style="color:var(--' + (nKieran?'accent':'jade') + ')">' + (nKieran ? KIERAN_LABEL : '音音') + '</div>';
             notesHtml += '<div class="overview-annot-text">' + esc(cleaned) + '</div></div>';
             for (const r of replies) {
               const rKieran = r.author === '克先生';
               notesHtml += '<div style="border-top:0.5px solid var(--border-soft);padding:4px 0 4px 12px">';
-              notesHtml += '<div class="overview-annot-author" style="color:var(--' + (rKieran?'accent':'jade') + ')"><span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' + (rKieran?'克先生':'音音') + '</div>';
+              notesHtml += '<div class="overview-annot-author" style="color:var(--' + (rKieran?'accent':'jade') + ')"><span style="font-size:8px;color:var(--ink4);margin-right:3px">&#8617;</span>' + (rKieran ? KIERAN_LABEL : '音音') + '</div>';
               notesHtml += '<div class="overview-annot-text">' + esc(r.text || '') + '</div></div>';
             }
           }
@@ -1576,7 +1669,7 @@ function renderAnnotationsOverview() {
         for (const n of standaloneNotes) {
           const nKieran = n.author === '克先生';
           const nColor = nKieran ? 'accent' : 'jade';
-          const nAuthor = nKieran ? '克先生' : '音音';
+          const nAuthor = nKieran ? KIERAN_LABEL : '音音';
           inner += '<div class="overview-annot ' + (nKieran?'kieran':'user') + '">';
           inner += '<div class="overview-annot-author" style="color:var(--' + nColor + ')">' + nAuthor + '</div>';
           inner += '<div class="overview-annot-text">' + esc(n.text || '') + '</div></div>';
