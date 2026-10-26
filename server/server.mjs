@@ -1411,6 +1411,13 @@ app.post("/mcp/sse", async (req, res) => {
   await transport.handleRequest(req, res, req.body);
 });
 
+// 客户端关会话（InKieran 门房每次转调开一个、调完就关）
+app.delete("/mcp/sse", async (req, res) => {
+  const t = transports[req.headers["mcp-session-id"]]?.transport;
+  if (!(t instanceof StreamableHTTPServerTransport)) { res.status(404).end(); return; }
+  await t.handleRequest(req, res);
+});
+
 app.get("/mcp/sse", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"];
   // 带 mcp-session-id 的 GET 一定来自 streamable-http 客户端；legacy SSE 客户端
