@@ -992,7 +992,7 @@ app.post("/api/books/:id/annotations", async (req, res) => {
         };
         pushPayload = {
           type: annot.type, author: annot.author, book_id: book.id, book_title: book.title,
-          pdf_page: pdfPage, text: (annot.text || annot.quote || "").slice(0, 200),
+          pdf_page: pdfPage, text: annot.text || annot.quote || "",
           paragraph_text: getFidelityPageText(book, pdfPage).slice(0, 200),
         };
       } else {
@@ -1011,8 +1011,8 @@ app.post("/api/books/:id/annotations", async (req, res) => {
         const para = (book.paragraphs || []).find(p => p.id === paragraph_id);
         pushPayload = {
           type: annot.type, author: annot.author, book_id: book.id, book_title: book.title,
-          paragraph_id, text: (annot.text || "").slice(0, 200),
-          paragraph_text: (para?.text || "").slice(0, 200),
+          paragraph_id, text: annot.text || "",
+          paragraph_text: para?.text || "",
         };
       }
       book.annotations.push(annot);
